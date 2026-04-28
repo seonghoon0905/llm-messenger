@@ -6,18 +6,18 @@ import '../chat_screen.dart';
 class ChatListTab extends StatelessWidget {
   final List<ChatRoom> chatRooms;
   final Function(int) onLongPress;
+  final VoidCallback onReturnFromChat;
 
   const ChatListTab({
     super.key,
     required this.chatRooms,
     required this.onLongPress,
+    required this.onReturnFromChat,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (chatRooms.isEmpty) {
-      return _buildEmptyState();
-    }
+    if (chatRooms.isEmpty) return _buildEmptyState();
 
     return ListView.separated(
       itemCount: chatRooms.length,
@@ -26,15 +26,14 @@ class ChatListTab extends StatelessWidget {
         final room = chatRooms[index];
         return ChatListTile(
           room: room,
-          onTap: () {
-            Future.delayed(const Duration(milliseconds: 50), () {
-              if (context.mounted) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => ChatScreen(chatRoom: room)),
-                );
-              }
-            });
+          onTap: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ChatScreen(chatRoom: room),
+              ),
+            );
+            onReturnFromChat();
           },
           onLongPress: () => onLongPress(index),
         );

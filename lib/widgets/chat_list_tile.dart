@@ -17,27 +17,32 @@ class ChatListTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       leading: const CircleAvatar(
-        child: Icon(Icons.person_outline),
+        backgroundColor: Colors.blueAccent,
+        child: Icon(Icons.person, color: Colors.white),
       ),
       title: Text(
         room.title,
         style: const TextStyle(fontWeight: FontWeight.bold),
       ),
+
       subtitle: Text(
-        room.messages.isEmpty ? '대화 내용이 없습니다.' : room.messages.last.text,
+        (room.lastMessage == null || room.lastMessage!.isEmpty)
+            ? '대화 내용이 없습니다.'
+            : room.lastMessage!,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 13, color: Colors.black54),
       ),
       trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
+        mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          const Spacer(),
           Text(
             room.relation,
             style: TextStyle(
               fontSize: 12,
-              color: Colors.grey.withValues(alpha: 0.6),
+              fontWeight: FontWeight.w500,
+              color: Colors.blueGrey.withValues(alpha: 0.6),
             ),
           ),
         ],

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../models/user_profile.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 class AppStyle {
   // --- [ Color Palette ] ---
@@ -11,8 +13,8 @@ class AppStyle {
   // --- [ Personality Stat Colors (Duolingo Style) ] ---
   static const Color statDominance = Color(0xFFFF9800); // 주도성: 오렌지
   static const Color statAffiliation = Color(0xFF4CAF50); // 친화성: 초록
-  static const Color statOpenness = Color(0xFF2196F3);   // 개방성: 파랑
-  static const Color statStability = Color(0xFF9C27B0);  // 정서안정: 보라
+  static const Color statOpenness = Color(0xFF2196F3); // 개방성: 파랑
+  static const Color statStability = Color(0xFF9C27B0); // 정서안정: 보라
   static const Color characterBoxBg = Color(0xFFFFF8E1); // 캐릭터 배경 (연한 노랑)
   static const Color characterBoxText = Color(0xFFD4A017); // 캐릭터 텍스트 (진한 황금색)
 
@@ -47,4 +49,28 @@ class AppStyle {
     fontWeight: FontWeight.bold,
     color: Colors.black87,
   );
+
+  static String? myLoggedInId;
+  static UserProfile? myProfile;
+  static const String baseUrl = "http://192.168.1.4:8000";
+  static const String serverIp = "192.168.1.4";
+  static const String wsUrl = "ws://$serverIp:8000/ws";
+
+  static WebSocketChannel? channel;
+  static Stream<dynamic>? globalStream;
+
+  static void connectSocket(String userId) {
+    channel?.sink.close();
+
+    final url = Uri.parse("$wsUrl/$userId");
+    channel = WebSocketChannel.connect(url);
+    globalStream = channel!.stream.asBroadcastStream();
+    print("🌐 전역 소켓 연결 시도: $url");
+  }
+
+  static void disconnectSocket() {
+    channel?.sink.close();
+    channel = null;
+    print("🔌 전역 소켓 연결 해제");
+  }
 }

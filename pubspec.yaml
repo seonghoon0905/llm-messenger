@@ -30,15 +30,19 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  google_fonts: ^6.2.1
   sqflite: ^2.3.0
   path: ^1.9.0
+  http: ^1.2.0
   file_picker: ^8.0.0
   fl_chart: ^0.66.2
+  web_socket_channel: ^3.0.1
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   sqflite_common_ffi: ^2.4.0+2
+  window_manager: ^0.5.1
 
 dev_dependencies:
   flutter_test:
@@ -92,3 +96,10 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+  assets:
+    - assets/NotoColorEmoji.ttf # assets 폴더도 등록해야 함
+
+  fonts:
+    - family: NotoColorEmoji # 폰트 이름 정의
+      fonts:
+        - asset: assets/NotoColorEmoji.ttf

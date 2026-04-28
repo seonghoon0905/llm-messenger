@@ -18,15 +18,19 @@ class LearyRadarChart extends StatelessWidget {
         RadarChartData(
           dataSets: [
             RadarDataSet(
-              fillColor: AppStyle.primaryBlue.withOpacity(0.2),
+              fillColor: AppStyle.primaryBlue.withValues(alpha: 0.2),
               borderColor: AppStyle.primaryBlue,
               entryRadius: 3,
               dataEntries: [
                 // image_1.png의 축 순서대로 배치 (주도, 우호, 순응, 적대)
-                RadarEntry(value: data.dominanceScore.toDouble()),     // 상: 주도
-                RadarEntry(value: data.friendlinessScore.toDouble()),   // 우: 우호
-                RadarEntry(value: (100 - data.dominanceScore).toDouble()), // 하: 순응
-                RadarEntry(value: (100 - data.friendlinessScore).toDouble()), // 좌: 적대
+                RadarEntry(value: data.dominanceScore.toDouble()), // 상: 주도
+                RadarEntry(value: data.friendlinessScore.toDouble()), // 우: 우호
+                RadarEntry(
+                  value: (100 - data.dominanceScore).toDouble(),
+                ), // 하: 순응
+                RadarEntry(
+                  value: (100 - data.friendlinessScore).toDouble(),
+                ), // 좌: 적대
               ],
             ),
           ],
@@ -50,7 +54,7 @@ class BigFiveRadarChart extends StatelessWidget {
         RadarChartData(
           dataSets: [
             RadarDataSet(
-              fillColor: AppStyle.statOpenness.withOpacity(0.2),
+              fillColor: AppStyle.statOpenness.withValues(alpha: 0.2),
               borderColor: AppStyle.statOpenness,
               entryRadius: 3,
               dataEntries: [
@@ -59,7 +63,9 @@ class BigFiveRadarChart extends StatelessWidget {
                 RadarEntry(value: data.conscientiousness * 100),
                 RadarEntry(value: data.extraversion * 100),
                 RadarEntry(value: data.agreeableness * 100),
-                RadarEntry(value: (1 - data.neuroticism) * 100), // Stability로 변환
+                RadarEntry(
+                  value: (1 - data.neuroticism) * 100,
+                ), // Stability로 변환
               ],
             ),
           ],

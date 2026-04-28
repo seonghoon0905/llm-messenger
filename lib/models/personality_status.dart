@@ -1,4 +1,3 @@
-// models/personality_status.dart
 import 'package:flutter/material.dart';
 
 // 1. Leary 대인관계 모델 데이터
@@ -23,7 +22,7 @@ class BigFiveData {
   double conscientiousness;
   double extraversion;
   double agreeableness;
-  double neuroticism; // 이미지의 Emotional Stability의 역(逆) 지표
+  double neuroticism;
 
   BigFiveData({
     this.openness = 0.5,

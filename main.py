@@ -1,8 +1,11 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import List, Dict, Optional
 import sqlite3
 import json
+import os
+import urllib.request
+import urllib.error
 
 app = FastAPI()
 
@@ -228,6 +231,180 @@ class UpdateStatusRequest(BaseModel):
     user_id: str
     status_message: str
 
+
+class AssistMessage(BaseModel):
+    role: str
+    text: str
+
+
+class LlmAssistRequest(BaseModel):
+    recentMessages: List[AssistMessage]
+    partnerLastMessage: str
+    draft: str
+
+
+def _build_llm_assist_system_prompt() -> str:
+    return """
+당신은 사용자의 한국어 메신저 답장을 다듬는 실용적인 코칭 도우미입니다.
+반드시 최근 대화 맥락과 상대방의 마지막 발화를 함께 보고 판단하십시오.
+
+목표:
+- 현재 draft가 너무 차갑거나 공격적이거나 맥락에 어긋나는지 판단합니다.
+- 피드백이 필요하면 짧은 코칭 메시지와 이유, 그리고 실제로 보낼 수 있는 더 자연스러운 rewrite 1개를 제안합니다.
+- 피드백이 필요 없으면 shouldFeedback=false로 반환합니다.
+
+원칙:
+- 사용자의 의도는 유지하되 표현만 더 자연스럽게 정리합니다.
+- 상대방의 마지막 발화에 직접 반응하는 답장을 우선합니다.
+- 지나치게 교과서적이거나 상담체인 표현은 피합니다.
+- JSON 외 다른 텍스트는 출력하지 않습니다.
+
+응답 JSON 형식:
+{
+  "shouldFeedback": boolean,
+  "feedback": "코칭 메시지 또는 null",
+  "reason": "간단한 이유 또는 null",
+  "rewrite": "추천 답장 또는 null"
+}
+""".strip()
+
+
+def _build_llm_assist_user_prompt(payload: LlmAssistRequest) -> str:
+    context_lines = []
+    for message in payload.recentMessages:
+        speaker = "상대방" if message.role == "partner" else "나"
+        context_lines.append(f"[{speaker}] {message.text}")
+    context_text = "\n".join(context_lines) if context_lines else "(대화 내역 없음)"
+
+    return f"""
+[최근 대화 맥락]
+{context_text}
+
+[상대방 마지막 메시지]
+{payload.partnerLastMessage or "(없음)"}
+
+[현재 draft]
+{payload.draft}
+
+위 내용을 바탕으로, 현재 draft가 충분히 자연스러운지 판단하고 지정된 JSON 형식으로만 답변해주세요.
+""".strip()
+
+
+def _sanitize_assist_response(raw: dict) -> dict:
+    should_feedback = bool(raw.get("shouldFeedback"))
+    feedback = raw.get("feedback") if isinstance(raw.get("feedback"), str) else None
+    reason = raw.get("reason") if isinstance(raw.get("reason"), str) else None
+    rewrite = raw.get("rewrite") if isinstance(raw.get("rewrite"), str) else None
+
+    if not should_feedback:
+        feedback = None
+        reason = None
+        rewrite = None
+
+    return {
+        "shouldFeedback": should_feedback,
+        "feedback": feedback,
+        "reason": reason,
+        "rewrite": rewrite,
+    }
+
+
+def _heuristic_llm_assist(payload: LlmAssistRequest) -> dict:
+    draft = payload.draft.strip()
+    partner_last = payload.partnerLastMessage.strip()
+
+    if not draft:
+        return {
+            "shouldFeedback": False,
+            "feedback": None,
+            "reason": None,
+            "rewrite": None,
+        }
+
+    harsh_tokens = ["됐", "싫", "짜증", "왜", "그만", "몰라", "바빠", "안 해"]
+    harsh = any(token in draft for token in harsh_tokens)
+
+    if harsh:
+        rewrite = draft
+        if not any(ending in draft for ending in ["요", "습니다", "해줘", "할게"]):
+            rewrite = f"{draft} 조금만 부드럽게 말해줄래?"
+
+        return {
+            "shouldFeedback": True,
+            "feedback": "조금 직설적으로 들릴 수 있어요. 상대방 말에 반응하는 완충 표현을 한 줄 더 넣는 편이 안전합니다.",
+            "reason": "현재 초안은 의도는 전달되지만 상대방이 차갑게 받아들일 가능성이 있습니다.",
+            "rewrite": rewrite,
+        }
+
+    if partner_last and "?" in partner_last and len(draft) < 4:
+        return {
+            "shouldFeedback": True,
+            "feedback": "상대방 질문에 조금 더 직접 반응하면 자연스럽습니다.",
+            "reason": "마지막 메시지가 질문인데 현재 초안은 답으로 읽히기엔 정보가 부족합니다.",
+            "rewrite": f"{draft} 자세한 건 조금 있다가 말해줄게." if draft else None,
+        }
+
+    return {
+        "shouldFeedback": False,
+        "feedback": None,
+        "reason": None,
+        "rewrite": None,
+    }
+
+
+def _call_openai_llm_assist(payload: LlmAssistRequest) -> Optional[dict]:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    request_body = {
+        "model": model_name,
+        "response_format": {"type": "json_object"},
+        "temperature": 0.5,
+        "max_tokens": 500,
+        "messages": [
+            {"role": "system", "content": _build_llm_assist_system_prompt()},
+            {"role": "user", "content": _build_llm_assist_user_prompt(payload)},
+        ],
+    }
+
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=json.dumps(request_body).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            content = data["choices"][0]["message"]["content"]
+            parsed = json.loads(content)
+            return _sanitize_assist_response(parsed)
+    except (urllib.error.URLError, urllib.error.HTTPError, KeyError, json.JSONDecodeError):
+        return None
+
+
+@app.post("/llm-assist")
+async def llm_assist(req: LlmAssistRequest):
+    if not req.draft.strip():
+        return {
+            "shouldFeedback": False,
+            "feedback": None,
+            "reason": None,
+            "rewrite": None,
+        }
+
+    llm_result = _call_openai_llm_assist(req)
+    if llm_result is not None:
+        return llm_result
+
+    return _heuristic_llm_assist(req)
+
 @app.post("/users/update_status")
 async def update_status(req: UpdateStatusRequest):
     conn = get_db()
@@ -239,4 +416,4 @@ async def update_status(req: UpdateStatusRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8000)

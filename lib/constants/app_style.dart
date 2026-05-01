@@ -52,8 +52,8 @@ class AppStyle {
 
   static String? myLoggedInId;
   static UserProfile? myProfile;
-  static const String baseUrl = "http://192.168.1.4:8000";
-  static const String serverIp = "192.168.1.4";
+  static const String baseUrl = "http://127.0.0.1:8000";
+  static const String serverIp = "127.0.0.1";
   static const String wsUrl = "ws://$serverIp:8000/ws";
 
   static WebSocketChannel? channel;

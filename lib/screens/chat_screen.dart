@@ -11,7 +11,7 @@ import '../widgets/chat_input_area.dart';
 import '../widgets/chat_drawer.dart';
 import '../services/log_parser.dart';
 import '../services/db_helper.dart';
-import 'package:http/http.dart' as http;
+import '../services/llm_assist_service.dart';
 import 'dart:convert';
 import 'dart:async';
 
@@ -29,7 +29,11 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   List<Message> _displayMessages = [];
   bool _isLoading = true;
+  bool _isAssistLoading = false;
+  String? _assistError;
+  LlmAssistResponse? _assistResponse;
   final List<UserProfile> _participants = [];
+  final LlmAssistService _llmAssistService = LlmAssistService();
 
   @override
   void initState() {
@@ -119,6 +123,8 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _displayMessages.insert(0, myMsg);
         _controller.clear();
+        _assistError = null;
+        _assistResponse = null;
       });
       _scrollController.animateTo(
         0,
@@ -126,6 +132,75 @@ class _ChatScreenState extends State<ChatScreen> {
         curve: Curves.easeOut,
       );
     }
+  }
+
+  Future<void> _requestFeedback() async {
+    final draft = _controller.text.trim();
+    if (draft.isEmpty) {
+      setState(() {
+        _assistError = "먼저 초안을 입력해주세요.";
+        _assistResponse = null;
+      });
+      return;
+    }
+
+    final recentMessages = _displayMessages.reversed
+        .take(6)
+        .map(
+          (message) => AssistRecentMessage(
+            role: message.isMe ? 'me' : 'partner',
+            text: message.text,
+          ),
+        )
+        .toList();
+
+    final partnerLastMessage = _displayMessages
+        .where((message) => !message.isMe)
+        .map((message) => message.text)
+        .cast<String?>()
+        .firstWhere((text) => text != null, orElse: () => null) ??
+        "";
+
+    setState(() {
+      _isAssistLoading = true;
+      _assistError = null;
+      _assistResponse = null;
+    });
+
+    try {
+      final response = await _llmAssistService.requestFeedback(
+        recentMessages: recentMessages,
+        partnerLastMessage: partnerLastMessage,
+        draft: draft,
+      );
+      if (!mounted) return;
+      setState(() {
+        _assistResponse = response;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _assistError = "피드백을 불러오지 못했습니다: $e";
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAssistLoading = false;
+        });
+      }
+    }
+  }
+
+  void _applyRewrite() {
+    final rewrite = _assistResponse?.rewrite;
+    if (rewrite == null || rewrite.trim().isEmpty) return;
+    _controller.text = rewrite;
+    _controller.selection = TextSelection.fromPosition(
+      TextPosition(offset: _controller.text.length),
+    );
+    setState(() {
+      _assistError = null;
+    });
   }
 
   // Show Profile
@@ -315,6 +390,11 @@ class _ChatScreenState extends State<ChatScreen> {
                 ChatInputArea(
                   controller: _controller,
                   onSend: _handleSend,
+                  onRequestFeedback: _requestFeedback,
+                  onApplyRewrite: _applyRewrite,
+                  isFeedbackLoading: _isAssistLoading,
+                  feedbackError: _assistError,
+                  feedbackResult: _assistResponse,
                 ),
               ],
             ),

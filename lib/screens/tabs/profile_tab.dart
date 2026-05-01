@@ -87,10 +87,9 @@ class _ProfileTabState extends State<ProfileTab> {
                   await DBHelper().insertFriend(newFriend);
                   await _loadFriendsFromLocal(); // 목록 새로고침
 
-                  if (mounted) {
-                    Navigator.pop(ctx);
-                    _showSnackBar("${newFriend.name}님을 추가했습니다!");
-                  }
+                  if (!ctx.mounted) return;
+                  Navigator.pop(ctx);
+                  _showSnackBar("${newFriend.name}님을 추가했습니다!");
                 } else {
                   _showSnackBar(data['message'] ?? "사용자를 찾을 수 없거나 서버 오류입니다.");
                 }
@@ -121,10 +120,9 @@ class _ProfileTabState extends State<ProfileTab> {
             onPressed: () async {
               await DBHelper().deleteFriend(friend.userId); // ID 기반 삭제
               await _loadFriendsFromLocal(); // 목록 새로고침
-              if (mounted) {
-                Navigator.pop(ctx);
-                _showSnackBar("삭제되었습니다.");
-              }
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+              _showSnackBar("삭제되었습니다.");
             },
             child: const Text("삭제", style: TextStyle(color: Colors.red)),
           ),
@@ -171,8 +169,7 @@ class _ProfileTabState extends State<ProfileTab> {
                   )
                 else
                   ..._friends
-                      .map((friend) => _buildFriendTile(friend))
-                      .toList(),
+                      .map((friend) => _buildFriendTile(friend)),
               ],
             ),
     );
@@ -225,10 +222,9 @@ class _ProfileTabState extends State<ProfileTab> {
 
                   // 3. UI 갱신
                   setState(() {});
-                  if (mounted) {
-                    Navigator.pop(ctx);
-                    _showSnackBar("닉네임이 변경되었습니다!");
-                  }
+                  if (!ctx.mounted) return;
+                  Navigator.pop(ctx);
+                  _showSnackBar("닉네임이 변경되었습니다!");
                 }
               } catch (e) {
                 _showSnackBar("변경 실패: $e");
@@ -290,10 +286,9 @@ class _ProfileTabState extends State<ProfileTab> {
                   );
 
                   setState(() {}); // UI 리프레시
-                  if (mounted) {
-                    Navigator.pop(ctx);
-                    _showSnackBar("상태 메시지가 변경되었습니다.");
-                  }
+                  if (!ctx.mounted) return;
+                  Navigator.pop(ctx);
+                  _showSnackBar("상태 메시지가 변경되었습니다.");
                 }
               } catch (e) {
                 _showSnackBar("변경 실패: $e");
@@ -380,7 +375,7 @@ class _ProfileTabState extends State<ProfileTab> {
             color: AppStyle.characterBoxBg,
             borderRadius: BorderRadius.circular(15),
             border: Border.all(
-              color: AppStyle.characterBoxText.withOpacity(0.3),
+              color: AppStyle.characterBoxText.withValues(alpha: 0.3),
             ),
           ),
           child: Row(

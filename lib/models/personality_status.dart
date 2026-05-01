@@ -1,5 +1,3 @@
-import 'package:flutter/material.dart';
-
 // 1. Leary 대인관계 모델 데이터
 class LearyData {
   double dominantConforming;  // 주도적 <-> 순응적
@@ -49,8 +47,8 @@ class PersonalityStatus {
     BigFiveData? bigFive,
     this.currentProfileImageUrl = 'assets/images/profiles/default.png',
     this.title = '분석 대기 중',
-  }) : this.leary = leary ?? LearyData(),
-        this.bigFive = bigFive ?? BigFiveData();
+  }) : leary = leary ?? LearyData(),
+        bigFive = bigFive ?? BigFiveData();
 
   // ★ 핵심: 나중에 분석 엔진이 호출할 함수
   // 수치가 변하면 이 함수를 통해 프로필 사진과 칭호가 자동으로 업데이트됩니다.

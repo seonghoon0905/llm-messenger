@@ -52,7 +52,9 @@ class _MainScreenState extends State<MainScreen> {
           );
           try {
             await DBHelper().insertChatRoom(serverRoom);
-          } catch(e) {} // 이미 존재하면 무시
+          } catch (e) {
+            debugPrint("방 존재: \$e");
+          } // 이미 존재하면 무시
         }
       }
     } catch (e) {
@@ -75,7 +77,9 @@ class _MainScreenState extends State<MainScreen> {
           );
           try {
             await DBHelper().insertChatRoom(newRoom);
-          } catch(e) {}
+          } catch (e) {
+            debugPrint("방 존재: \$e");
+          }
           _loadChatRooms();
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -83,14 +87,14 @@ class _MainScreenState extends State<MainScreen> {
             );
           }
         } else if (data['content'] != null && data['room_id'] != null) {
-          // 일반 메시지 수신 시 DB 저장 및 목록 갱신
+          // Save incoming message to DB and update list
           final incomingMsg = Message(
             text: data['content'] ?? "",
             sender: data['sender_nickname'] ?? data['sender_id'] ?? "unknown",
             timestamp: DateTime.parse(data['timestamp'] ?? DateTime.now().toIso8601String()),
           );
           await DBHelper().insertMessage(data['room_id'], incomingMsg);
-          _loadChatRooms(); // 목록의 최신 메시지 업데이트
+          _loadChatRooms(); // Update UI list
         }
       });
     }
@@ -102,26 +106,26 @@ class _MainScreenState extends State<MainScreen> {
     super.dispose();
   }
 
-  // --- [ 로컬 데이터 로드 ] ---
+  // Load Local Data
   Future<void> _loadChatRooms() async {
-    // 보안을 위해 로그인 아이디가 있을 때만 로컬 데이터를 보여줍니다.
+    // Show local data only if user is logged in
     if (AppStyle.myLoggedInId == null) return;
 
-    // 서버 API 호출 대신 로컬 DBHelper를 통해 데이터를 가져옵니다.
+    // Fetch from local DB
     final rooms = await DBHelper().getChatRooms();
 
     setState(() {
       _chatRooms.clear();
       _chatRooms.addAll(rooms);
-      // 최신 메시지 시간 순으로 정렬 (선택 사항)
+      // Sort by recent message time
       _chatRooms.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
     });
   }
 
-  // --- [ 새 채팅방 생성 (로컬 전용) ] ---
+  // Create New Chat Room (Local)
   void _createNewChat(String title, String relation) async {
     final newRoom = ChatRoom(
-      // 서버가 ID를 생성하지 않으므로 고유한 String ID를 직접 생성합니다.
+      // Generate unique string ID
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       title: title,
       relation: relation,
@@ -130,10 +134,10 @@ class _MainScreenState extends State<MainScreen> {
     );
 
     try {
-      // 로컬 DB에 저장
+      // Save to local DB
       await DBHelper().insertChatRoom(newRoom);
 
-      // UI 갱신
+      // Update UI
       await _loadChatRooms();
     } catch (e) {
       debugPrint("방 생성 실패: $e");
@@ -147,7 +151,7 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 탭별 페이지 구성
+    // Tab pages
     final List<Widget> pages = [
       const ProfileTab(),
       ChatListTab(
@@ -191,7 +195,7 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  // --- [ 채팅방 옵션 (수정/삭제) ] ---
+  // Chat Room Options (Edit/Delete)
   void _showChatOptions(int index) {
     final room = _chatRooms[index];
     showModalBottomSheet(
@@ -212,12 +216,12 @@ class _MainScreenState extends State<MainScreen> {
                   initialTitle: room.title,
                   initialRelation: room.relation,
                   onSave: (newTitle, newRelation) async {
-                    // 메모리 데이터 업데이트
+                    // Update memory data
                     setState(() {
                       room.title = newTitle;
                       room.relation = newRelation;
                     });
-                    // 로컬 DB 업데이트 (DBHelper에 updateChatRoom 구현 필요)
+                    // Update local DB
                     await DBHelper().updateChatRoom(room);
                   },
                 );
@@ -231,16 +235,15 @@ class _MainScreenState extends State<MainScreen> {
                 ChatDialogs.showDeleteDialog(
                   context: context,
                   onDelete: () async {
-                    // 로컬 DB에서 삭제
+                    // Delete from local DB
                     await DBHelper().deleteChatRoom(room.id);
-                    // 목록 새로고침
+                    // Refresh list
                     await _loadChatRooms();
 
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('대화방이 삭제되었습니다.')),
-                      );
-                    }
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('대화방이 삭제되었습니다.')),
+                    );
                   },
                 );
               },

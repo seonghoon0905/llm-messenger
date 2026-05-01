@@ -76,7 +76,7 @@ class ChatDialogs {
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
                 decoration: const InputDecoration(labelText: "관계"),
-                value: selectedRelation,
+                initialValue: selectedRelation,
                 items: relations.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
                 onChanged: (value) {
                   if (value != null) setDialogState(() => selectedRelation = value);

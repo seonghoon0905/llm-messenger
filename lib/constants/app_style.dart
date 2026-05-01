@@ -65,12 +65,12 @@ class AppStyle {
     final url = Uri.parse("$wsUrl/$userId");
     channel = WebSocketChannel.connect(url);
     globalStream = channel!.stream.asBroadcastStream();
-    print("🌐 전역 소켓 연결 시도: $url");
+    debugPrint("🌐 전역 소켓 연결 시도: $url");
   }
 
   static void disconnectSocket() {
     channel?.sink.close();
     channel = null;
-    print("🔌 전역 소켓 연결 해제");
+    debugPrint("🔌 전역 소켓 연결 해제");
   }
 }

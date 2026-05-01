@@ -12,7 +12,7 @@ class AnalysisScreen extends StatefulWidget {
 class _AnalysisScreenState extends State<AnalysisScreen> {
   String _selectedRoomId = "all";
 
-  // 임시 데이터셋 (나중에 DB/LLM 연동)
+  // Temporary dataset (To be replaced with DB/LLM integration)
   final Map<String, dynamic> _dataStore = {
     "all": {
       "name": "전체 평균",
@@ -45,21 +45,21 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
-          // 4. 대화창별 선택 목록 버튼
+          // Room selector button
           _buildRoomSelector(),
           const SizedBox(width: 20),
         ],
       ),
-      // 1. 모든 정보를 스크롤 없이 한 화면에 (Safe Area 내 고정 레이아웃)
+      // Single screen layout without scrolling (Fixed layout in Safe Area)
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            // 현재 어떤 데이터를 보고 있는지 표시하는 인디케이터
+            // Indicator for currently viewed data
             _buildCurrentViewHeader(currentData['name']),
             const SizedBox(height: 12),
 
-            // 5. Leary 모델 단락 (그래프 + 사진 공간)
+            // Leary Model Section (Chart + Image space)
             Expanded(
               flex: 1,
               child: _buildAnalysisSection(
@@ -75,7 +75,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             ),
             const SizedBox(height: 12),
 
-            // 5. Big-5 모델 단락 (그래프 + 사진 공간)
+            // Big-5 Model Section (Chart + Image space)
             Expanded(
               flex: 1,
               child: _buildAnalysisSection(
@@ -96,7 +96,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     );
   }
 
-  // --- [ UI 빌더 함수들 ] ---
+  // UI Builder Functions
 
   Widget _buildRoomSelector() {
     return PopupMenuButton<String>(
@@ -148,10 +148,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
           Expanded(
             child: Row(
               children: [
-                // 왼쪽: 방사형 그래프
+                // Left: Radar Chart
                 Expanded(flex: 3, child: chart),
                 const SizedBox(width: 16),
-                // 오른쪽: 사진 첨부 공간 (비워둠)
+                // Right: Image placeholder
                 Expanded(
                   flex: 2,
                   child: Container(

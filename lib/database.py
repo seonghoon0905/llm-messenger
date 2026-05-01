@@ -17,7 +17,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS rooms (
             room_id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
-            relation TEXT,            -- 우리가 보냈던 '가족', '친구' 등 태그 저장
+            relation TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)

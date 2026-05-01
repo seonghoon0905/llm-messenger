@@ -105,6 +105,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
               onLongPress: (index) {
                 // 길게 눌러서 삭제하는 로직 등
               },
+              onReturnFromChat: _loadChatRooms,
             ),
     );
   }

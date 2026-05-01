@@ -1,9 +1,10 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict
 import sqlite3
 import json
 import os
+import re
 import urllib.request
 import urllib.error
 
@@ -243,13 +244,26 @@ class LlmAssistRequest(BaseModel):
     draft: str
 
 
+class AutoReplyRequest(BaseModel):
+    recentMessages: List[AssistMessage]
+    partnerLastMessage: str
+
+
+class AnalyzeDraftRequest(BaseModel):
+    recentMessages: List[AssistMessage]
+    partnerLastMessage: str
+    draft: str
+
+
 def _build_llm_assist_system_prompt() -> str:
     return """
 당신은 사용자의 한국어 메신저 답장을 다듬는 실용적인 코칭 도우미입니다.
 반드시 최근 대화 맥락과 상대방의 마지막 발화를 함께 보고 판단하십시오.
 
 목표:
-- 현재 draft가 너무 차갑거나 공격적이거나 맥락에 어긋나는지 판단합니다.
+- 현재 draft가 상대방 마지막 말에 제대로 반응하는지 판단합니다.
+- 현재 draft가 너무 차갑거나 무례하거나 애매하거나 관계상 부적절한지 판단합니다.
+- 상대방이 질문했는데 답을 피하거나 놓치고 있는지도 판단합니다.
 - 피드백이 필요하면 짧은 코칭 메시지와 이유, 그리고 실제로 보낼 수 있는 더 자연스러운 rewrite 1개를 제안합니다.
 - 피드백이 필요 없으면 shouldFeedback=false로 반환합니다.
 
@@ -257,6 +271,7 @@ def _build_llm_assist_system_prompt() -> str:
 - 사용자의 의도는 유지하되 표현만 더 자연스럽게 정리합니다.
 - 상대방의 마지막 발화에 직접 반응하는 답장을 우선합니다.
 - 지나치게 교과서적이거나 상담체인 표현은 피합니다.
+- rewrite는 실제 메신저에서 바로 보낼 수 있는 짧고 자연스러운 한국어로 작성합니다.
 - JSON 외 다른 텍스트는 출력하지 않습니다.
 
 응답 JSON 형식:
@@ -286,7 +301,13 @@ def _build_llm_assist_user_prompt(payload: LlmAssistRequest) -> str:
 [현재 draft]
 {payload.draft}
 
-위 내용을 바탕으로, 현재 draft가 충분히 자연스러운지 판단하고 지정된 JSON 형식으로만 답변해주세요.
+판단 기준:
+1. draft가 상대방의 마지막 메시지에 실제로 반응하는가
+2. 말투가 차갑거나 무례하거나 지나치게 짧아 오해를 부를 수 있는가
+3. 상대방이 질문했는데 draft가 답을 하지 못하고 있는가
+4. 더 자연스럽고 덜 상처 주는 rewrite가 필요한가
+
+위 내용을 바탕으로 지정된 JSON 형식으로만 답변해주세요.
 """.strip()
 
 
@@ -309,53 +330,248 @@ def _sanitize_assist_response(raw: dict) -> dict:
     }
 
 
-def _heuristic_llm_assist(payload: LlmAssistRequest) -> dict:
-    draft = payload.draft.strip()
-    partner_last = payload.partnerLastMessage.strip()
-
-    if not draft:
-        return {
-            "shouldFeedback": False,
-            "feedback": None,
-            "reason": None,
-            "rewrite": None,
-        }
-
-    harsh_tokens = ["됐", "싫", "짜증", "왜", "그만", "몰라", "바빠", "안 해"]
-    harsh = any(token in draft for token in harsh_tokens)
-
-    if harsh:
-        rewrite = draft
-        if not any(ending in draft for ending in ["요", "습니다", "해줘", "할게"]):
-            rewrite = f"{draft} 조금만 부드럽게 말해줄래?"
-
-        return {
-            "shouldFeedback": True,
-            "feedback": "조금 직설적으로 들릴 수 있어요. 상대방 말에 반응하는 완충 표현을 한 줄 더 넣는 편이 안전합니다.",
-            "reason": "현재 초안은 의도는 전달되지만 상대방이 차갑게 받아들일 가능성이 있습니다.",
-            "rewrite": rewrite,
-        }
-
-    if partner_last and "?" in partner_last and len(draft) < 4:
-        return {
-            "shouldFeedback": True,
-            "feedback": "상대방 질문에 조금 더 직접 반응하면 자연스럽습니다.",
-            "reason": "마지막 메시지가 질문인데 현재 초안은 답으로 읽히기엔 정보가 부족합니다.",
-            "rewrite": f"{draft} 자세한 건 조금 있다가 말해줄게." if draft else None,
-        }
-
+def _sanitize_auto_reply_response(raw: dict) -> dict:
+    reply = raw.get("reply") if isinstance(raw.get("reply"), str) else ""
+    reason = raw.get("reason") if isinstance(raw.get("reason"), str) else None
     return {
-        "shouldFeedback": False,
-        "feedback": None,
-        "reason": None,
-        "rewrite": None,
+        "reply": reply.strip(),
+        "reason": reason,
     }
 
 
-def _call_openai_llm_assist(payload: LlmAssistRequest) -> Optional[dict]:
+def _looks_like_question(text: str) -> bool:
+    question_markers = [
+        "?",
+        "왜",
+        "뭐",
+        "무엇",
+        "어디",
+        "언제",
+        "누구",
+        "어떻게",
+        "가능",
+        "돼",
+        "되나",
+        "할까",
+        "해줄래",
+        "있어",
+        "맞아",
+    ]
+    lowered = text.strip().lower()
+    return any(marker in lowered for marker in question_markers)
+
+
+def _looks_too_short(text: str) -> bool:
+    return len(text.strip()) < 4
+
+
+def _contains_harsh_expression(text: str) -> bool:
+    harsh_patterns = [
+        "됐",
+        "싫",
+        "짜증",
+        "몰라",
+        "그만",
+        "안 해",
+        "귀찮",
+        "꺼져",
+        "알아서",
+    ]
+    return any(pattern in text for pattern in harsh_patterns)
+
+
+def _contains_distress_words(text: str) -> bool:
+    distress_patterns = [
+        "힘들",
+        "지쳤",
+        "속상",
+        "우울",
+        "불안",
+        "부담",
+        "걱정",
+        "짜증나",
+        "답답",
+    ]
+    return any(pattern in text for pattern in distress_patterns)
+
+
+def _is_dismissive(text: str) -> bool:
+    dismissive_patterns = [
+        "알아서",
+        "어쩌라고",
+        "그건 네가",
+        "나도 몰라",
+        "됐어",
+        "그만해",
+        "귀찮아",
+    ]
+    return any(pattern in text for pattern in dismissive_patterns)
+
+
+def _looks_like_answer(partner_last_message: str, draft: str) -> bool:
+    if not _looks_like_question(partner_last_message):
+        return True
+    answer_patterns = [
+        "응",
+        "아니",
+        "가능",
+        "어려워",
+        "괜찮",
+        "좋아",
+        "안 돼",
+        "돼",
+        "할게",
+        "못",
+    ]
+    if any(pattern in draft for pattern in answer_patterns):
+        return True
+    return len(draft.strip()) >= 8 and not _contains_harsh_expression(draft)
+
+
+_nlu_service_available = None
+_nlu_last_check_time = 0.0
+_nlu_recheck_interval = 30.0
+
+
+def _get_nlu_base_url() -> str:
+    return os.getenv("KOREAN_NLU_BASE_URL", "http://localhost:8001")
+
+
+def _nlu_unavailable_emotion() -> dict:
+    return {
+        "distressScore": 0.0,
+        "angerScore": 0.0,
+        "burdenScore": 0.0,
+        "warmthScore": 0.0,
+        "neutralScore": 0.0,
+        "topEmotionLabels": [],
+        "source": "unavailable",
+    }
+
+
+def _nlu_unavailable_speech_act() -> dict:
+    return {
+        "speechAct": "unknown",
+        "source": "unavailable",
+    }
+
+
+def _fetch_json(url: str, payload: dict = None, timeout: int = 2):
+    if payload is None:
+        req = urllib.request.Request(url, method="GET")
+    else:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _is_nlu_service_available() -> bool:
+    global _nlu_service_available, _nlu_last_check_time
+    if _nlu_service_available is True:
+        return True
+    if _nlu_service_available is False:
+        import time
+        if time.time() - _nlu_last_check_time < _nlu_recheck_interval:
+            return False
+    try:
+        _fetch_json(f"{_get_nlu_base_url()}/health", timeout=1)
+        _nlu_service_available = True
+    except Exception:
+        _nlu_service_available = False
+    import time
+    _nlu_last_check_time = time.time()
+    return bool(_nlu_service_available)
+
+
+def _get_nlu_speech_act(text: str) -> dict:
+    if not text.strip() or not _is_nlu_service_available():
+        return _nlu_unavailable_speech_act()
+    try:
+        data = _fetch_json(
+            f"{_get_nlu_base_url()}/speech-act",
+            {"text": text},
+            timeout=2,
+        )
+        act = data.get("speechAct", "unknown")
+        source = data.get("source", "unavailable")
+        return {
+            "speechAct": act if isinstance(act, str) else "unknown",
+            "source": source if source in ["3i4k", "unavailable"] else "unavailable",
+        }
+    except Exception:
+        return _nlu_unavailable_speech_act()
+
+
+def _get_nlu_emotion(text: str) -> dict:
+    if not text.strip() or not _is_nlu_service_available():
+        return _nlu_unavailable_emotion()
+    try:
+        data = _fetch_json(
+            f"{_get_nlu_base_url()}/emotion-scores",
+            {"text": text},
+            timeout=2,
+        )
+        if not isinstance(data.get("distressScore"), (float, int)):
+            return _nlu_unavailable_emotion()
+        normalized = _nlu_unavailable_emotion()
+        normalized.update(data)
+        normalized["source"] = "kote" if data.get("source") == "kote" else "unavailable"
+        return normalized
+    except Exception:
+        return _nlu_unavailable_emotion()
+
+
+def _build_auto_reply_system_prompt() -> str:
+    return """
+당신은 사용자의 카카오톡 답장 초안을 작성하는 도우미입니다.
+최근 대화 맥락과 상대방의 마지막 발화를 보고, 사용자 입장에서 자연스럽고 짧은 답장 초안 하나를 생성합니다.
+
+원칙:
+- 상대방의 마지막 메시지에 직접 반응해야 합니다.
+- 실제 메신저에서 바로 보낼 수 있는 한국어 문장으로 작성합니다.
+- 질문이면 답하거나 자연스럽게 보류합니다.
+- 요청이나 부탁이면 수락, 보류, 거절 중 맥락상 자연스러운 방향으로 답합니다.
+- 감정 표현이면 짧은 공감이나 반응을 우선합니다.
+- JSON 외 다른 텍스트는 출력하지 않습니다.
+
+응답 JSON 형식:
+{
+  "reply": "생성된 답장 초안",
+  "reason": "짧은 생성 이유"
+}
+""".strip()
+
+
+def _build_auto_reply_user_prompt(payload: AutoReplyRequest) -> str:
+    context_lines = []
+    for message in payload.recentMessages:
+      speaker = "상대방" if message.role == "partner" else "나"
+      context_lines.append(f"[{speaker}] {message.text}")
+    context_text = "\n".join(context_lines) if context_lines else "(대화 내역 없음)"
+
+    return f"""
+[최근 대화 맥락]
+{context_text}
+
+[상대방 마지막 메시지]
+{payload.partnerLastMessage}
+
+위 맥락을 바탕으로 사용자 입장에서 자연스러운 답장 초안 하나를 JSON 형식으로만 반환해주세요.
+""".strip()
+
+
+def _call_openai_llm_assist(payload: LlmAssistRequest) -> dict:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        return None
+        raise HTTPException(
+            status_code=503,
+            detail="OPENAI_API_KEY가 설정되지 않아 AI 피드백을 사용할 수 없습니다."
+        )
 
     model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     request_body = {
@@ -385,25 +601,212 @@ def _call_openai_llm_assist(payload: LlmAssistRequest) -> Optional[dict]:
             content = data["choices"][0]["message"]["content"]
             parsed = json.loads(content)
             return _sanitize_assist_response(parsed)
-    except (urllib.error.URLError, urllib.error.HTTPError, KeyError, json.JSONDecodeError):
-        return None
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"OpenAI 응답 오류: {exc.code}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="OpenAI 서버에 연결하지 못했습니다."
+        ) from exc
+    except (KeyError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="OpenAI 응답을 해석하지 못했습니다."
+        ) from exc
+
+
+def _call_openai_auto_reply(payload: AutoReplyRequest) -> dict:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="OPENAI_API_KEY가 설정되지 않아 자동 응답 생성을 사용할 수 없습니다."
+        )
+
+    model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    request_body = {
+        "model": model_name,
+        "response_format": {"type": "json_object"},
+        "temperature": 0.7,
+        "max_tokens": 300,
+        "messages": [
+            {"role": "system", "content": _build_auto_reply_system_prompt()},
+            {"role": "user", "content": _build_auto_reply_user_prompt(payload)},
+        ],
+    }
+
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=json.dumps(request_body).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            content = data["choices"][0]["message"]["content"]
+            parsed = json.loads(content)
+            result = _sanitize_auto_reply_response(parsed)
+            if not result["reply"]:
+                raise HTTPException(
+                    status_code=502,
+                    detail="OpenAI가 유효한 자동 응답을 반환하지 않았습니다."
+                )
+            return result
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"OpenAI 응답 오류: {exc.code}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="OpenAI 서버에 연결하지 못했습니다."
+        ) from exc
+    except (KeyError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="OpenAI 응답을 해석하지 못했습니다."
+        ) from exc
+
+
+def _analyze_draft_rule_based(payload: AnalyzeDraftRequest) -> dict:
+    draft = payload.draft.strip()
+    partner_last = payload.partnerLastMessage.strip()
+
+    partner_question = _looks_like_question(partner_last)
+    draft_too_short = _looks_too_short(draft)
+    harsh = _contains_harsh_expression(draft)
+    partner_distress = _contains_distress_words(partner_last)
+    dismissive = _is_dismissive(draft)
+    looks_like_answer = _looks_like_answer(partner_last, draft)
+
+    partner_speech = _get_nlu_speech_act(partner_last)
+    draft_speech = _get_nlu_speech_act(draft)
+    partner_emotion = _get_nlu_emotion(partner_last)
+    draft_emotion = _get_nlu_emotion(draft)
+    nlu_source = "kote" if (
+        partner_emotion.get("source") == "kote" or
+        draft_emotion.get("source") == "kote" or
+        partner_speech.get("source") == "3i4k" or
+        draft_speech.get("source") == "3i4k"
+    ) else "unavailable"
+
+    rules = [
+        {
+            "id": "draft_too_short",
+            "label": "초안이 너무 짧음",
+            "matched": bool(draft and draft_too_short),
+        },
+        {
+            "id": "partner_question",
+            "label": "상대방 발화가 질문임",
+            "matched": partner_question or partner_speech.get("speechAct") == "question",
+        },
+        {
+            "id": "question_not_answered",
+            "label": "질문에 대한 답이 부족함",
+            "matched": (
+                (partner_question or partner_speech.get("speechAct") == "question") and
+                (draft_too_short or not looks_like_answer)
+            ),
+        },
+        {
+            "id": "harsh_expression",
+            "label": "차갑거나 강한 표현 포함",
+            "matched": harsh,
+        },
+        {
+            "id": "distress_dismissive",
+            "label": "상대가 힘든데 초안이 무심함",
+            "matched": (partner_distress or partner_emotion.get("distressScore", 0) > 0.45 or partner_emotion.get("burdenScore", 0) > 0.45) and dismissive,
+        },
+        {
+            "id": "draft_negative_emotion",
+            "label": "초안의 부정 감정이 높음",
+            "matched": draft_emotion.get("angerScore", 0) > 0.45 or draft_emotion.get("burdenScore", 0) > 0.45,
+        },
+        {
+            "id": "partner_request",
+            "label": "상대방 발화가 요청/부탁 성격임",
+            "matched": partner_speech.get("speechAct") in ["command", "rhetorical_command"],
+        },
+    ]
+
+    if not draft or draft_too_short:
+        should_invoke = False
+        message = "초안이 너무 짧아 아직 큰 문제를 판단하기 어렵습니다."
+    else:
+        should_invoke = any(rule["matched"] for rule in rules if rule["id"] != "draft_too_short")
+        message = "큰 문제는 감지되지 않았습니다."
+        if should_invoke:
+            message = "표현을 한 번 다듬어보는 편이 좋겠습니다."
+
+    observed_features = {
+        "draftLength": len(draft),
+        "partnerLooksLikeQuestion": partner_question,
+        "draftLooksTooShort": draft_too_short,
+        "draftLooksLikeAnswer": looks_like_answer,
+        "containsHarshExpression": harsh,
+        "partnerContainsDistressWords": partner_distress,
+        "draftLooksDismissive": dismissive,
+        "partnerSpeechAct": partner_speech.get("speechAct", "unknown"),
+        "draftSpeechAct": draft_speech.get("speechAct", "unknown"),
+        "partnerEmotion": partner_emotion,
+        "draftEmotion": draft_emotion,
+        "nluSource": nlu_source,
+    }
+
+    return {
+        "shouldInvokeLlm": should_invoke,
+        "rules": rules,
+        "observedFeatures": observed_features,
+        "message": message,
+    }
 
 
 @app.post("/llm-assist")
 async def llm_assist(req: LlmAssistRequest):
-    if not req.draft.strip():
+    draft = req.draft.strip()
+    if not draft:
         return {
             "shouldFeedback": False,
-            "feedback": None,
-            "reason": None,
+            "feedback": "초안을 먼저 입력해주세요.",
+            "reason": "빈 초안은 피드백할 수 없습니다.",
             "rewrite": None,
         }
 
-    llm_result = _call_openai_llm_assist(req)
-    if llm_result is not None:
-        return llm_result
+    if len(draft) < 3:
+        return {
+            "shouldFeedback": False,
+            "feedback": "초안이 너무 짧아서 아직 판단하기 어렵습니다.",
+            "reason": "조금 더 구체적으로 입력하면 더 정확한 피드백을 줄 수 있습니다.",
+            "rewrite": None,
+        }
 
-    return _heuristic_llm_assist(req)
+    return _call_openai_llm_assist(req)
+
+
+@app.post("/auto-reply")
+async def auto_reply(req: AutoReplyRequest):
+    if not req.partnerLastMessage.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="상대방 마지막 메시지가 없어 자동 응답을 생성할 수 없습니다."
+        )
+    return _call_openai_auto_reply(req)
+
+
+@app.post("/analyze-draft")
+async def analyze_draft(req: AnalyzeDraftRequest):
+    return _analyze_draft_rule_based(req)
 
 @app.post("/users/update_status")
 async def update_status(req: UpdateStatusRequest):

@@ -1,17 +1,19 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../constants/app_style.dart';
 import '../models/message.dart';
 import '../models/chat_room.dart';
 import '../models/user_profile.dart';
+import '../models/ai_analysis_models.dart';
 import '../widgets/profile_modal.dart';
 import '../widgets/chat_message_bubble.dart';
 import '../widgets/chat_input_area.dart';
 import '../widgets/chat_drawer.dart';
 import '../services/log_parser.dart';
 import '../services/db_helper.dart';
-import '../services/llm_assist_service.dart';
+import '../services/ai_feedback_service.dart';
 import 'dart:convert';
 import 'dart:async';
 
@@ -29,11 +31,18 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   List<Message> _displayMessages = [];
   bool _isLoading = true;
-  bool _isAssistLoading = false;
-  String? _assistError;
-  LlmAssistResponse? _assistResponse;
+  bool _isFeedbackLoading = false;
+  bool _isAutoReplyLoading = false;
+  String? _feedbackError;
+  String? _autoReplyError;
+  String? _feedbackText;
+  String? _feedbackReason;
+  String? _feedbackRewrite;
+  String? _analysisSummary;
+  String? _debugSummary;
+  bool _shouldFeedback = false;
   final List<UserProfile> _participants = [];
-  final LlmAssistService _llmAssistService = LlmAssistService();
+  final AiFeedbackService _aiFeedbackService = AiFeedbackService();
 
   @override
   void initState() {
@@ -123,8 +132,7 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _displayMessages.insert(0, myMsg);
         _controller.clear();
-        _assistError = null;
-        _assistResponse = null;
+        _clearFeedbackState();
       });
       _scrollController.animateTo(
         0,
@@ -134,72 +142,164 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _requestFeedback() async {
-    final draft = _controller.text.trim();
-    if (draft.isEmpty) {
-      setState(() {
-        _assistError = "먼저 초안을 입력해주세요.";
-        _assistResponse = null;
-      });
-      return;
-    }
+  void _clearFeedbackState() {
+    _feedbackError = null;
+    _feedbackText = null;
+    _feedbackReason = null;
+    _feedbackRewrite = null;
+    _analysisSummary = null;
+    _debugSummary = null;
+    _shouldFeedback = false;
+  }
 
-    final recentMessages = _displayMessages.reversed
+  List<AiFeedbackRecentMessage> _buildRecentMessages() {
+    return _displayMessages.reversed
         .take(6)
         .map(
-          (message) => AssistRecentMessage(
+          (message) => AiFeedbackRecentMessage(
             role: message.isMe ? 'me' : 'partner',
             text: message.text,
           ),
         )
         .toList();
+  }
 
-    final partnerLastMessage = _displayMessages
+  String _findPartnerLastMessage() {
+    return _displayMessages
         .where((message) => !message.isMe)
         .map((message) => message.text)
         .cast<String?>()
         .firstWhere((text) => text != null, orElse: () => null) ??
         "";
+  }
+
+  String _buildDebugSummary(AiAnalyzeDraftResponse analyzeResponse) {
+    final matchedRules = analyzeResponse.rules
+        .where((rule) => rule.matched)
+        .map((rule) => rule.id)
+        .join(", ");
+    return "debug: shouldInvokeLlm=${analyzeResponse.shouldInvokeLlm}, "
+        "rules=${matchedRules.isEmpty ? 'none' : matchedRules}, "
+        "features=${analyzeResponse.observedFeatures}";
+  }
+
+  Future<void> _handleAiFeedback() async {
+    final draft = _controller.text.trim();
+    if (draft.isEmpty) {
+      setState(() {
+        _clearFeedbackState();
+        _feedbackError = "먼저 초안을 입력해주세요.";
+      });
+      return;
+    }
+
+    final recentMessages = _buildRecentMessages();
+    final partnerLastMessage = _findPartnerLastMessage();
 
     setState(() {
-      _isAssistLoading = true;
-      _assistError = null;
-      _assistResponse = null;
+      _isFeedbackLoading = true;
+      _autoReplyError = null;
+      _clearFeedbackState();
     });
 
     try {
-      final response = await _llmAssistService.requestFeedback(
+      final analyzeResponse = await _aiFeedbackService.analyzeDraft(
+        recentMessages: recentMessages,
+        partnerLastMessage: partnerLastMessage,
+        draft: draft,
+      );
+
+      if (!mounted) return;
+
+      if (!analyzeResponse.shouldInvokeLlm) {
+        setState(() {
+          _shouldFeedback = false;
+          _analysisSummary = analyzeResponse.message.isNotEmpty
+              ? analyzeResponse.message
+              : "큰 문제는 감지되지 않았습니다.";
+          if (kDebugMode) {
+            _debugSummary = _buildDebugSummary(analyzeResponse);
+          }
+        });
+        return;
+      }
+
+      final response = await _aiFeedbackService.requestFeedback(
         recentMessages: recentMessages,
         partnerLastMessage: partnerLastMessage,
         draft: draft,
       );
       if (!mounted) return;
       setState(() {
-        _assistResponse = response;
+        _shouldFeedback = response.shouldFeedback;
+        _feedbackText = response.feedback;
+        _feedbackReason = response.reason;
+        _feedbackRewrite = response.rewrite;
+        _analysisSummary = analyzeResponse.message;
+        if (kDebugMode) {
+          _debugSummary = _buildDebugSummary(analyzeResponse);
+        }
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _assistError = "피드백을 불러오지 못했습니다: $e";
+        _clearFeedbackState();
+        _feedbackError = "피드백을 불러오지 못했습니다: $e";
       });
     } finally {
       if (mounted) {
         setState(() {
-          _isAssistLoading = false;
+          _isFeedbackLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleAutoReply() async {
+    final recentMessages = _buildRecentMessages();
+    final partnerLastMessage = _findPartnerLastMessage();
+
+    setState(() {
+      _isAutoReplyLoading = true;
+      _autoReplyError = null;
+    });
+
+    try {
+      final response = await _aiFeedbackService.generateAutoReply(
+        recentMessages: recentMessages,
+        partnerLastMessage: partnerLastMessage,
+      );
+      if (!mounted) return;
+      _controller.text = response.reply;
+      _controller.selection = TextSelection.fromPosition(
+        TextPosition(offset: _controller.text.length),
+      );
+      setState(() {
+        _autoReplyError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _autoReplyError = "자동 응답 생성에 실패했습니다: $e";
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAutoReplyLoading = false;
         });
       }
     }
   }
 
   void _applyRewrite() {
-    final rewrite = _assistResponse?.rewrite;
+    final rewrite = _feedbackRewrite;
     if (rewrite == null || rewrite.trim().isEmpty) return;
     _controller.text = rewrite;
     _controller.selection = TextSelection.fromPosition(
       TextPosition(offset: _controller.text.length),
     );
     setState(() {
-      _assistError = null;
+      _feedbackError = null;
     });
   }
 
@@ -390,11 +490,19 @@ class _ChatScreenState extends State<ChatScreen> {
                 ChatInputArea(
                   controller: _controller,
                   onSend: _handleSend,
-                  onRequestFeedback: _requestFeedback,
+                  onFeedbackPressed: _handleAiFeedback,
+                  onAutoReplyPressed: _handleAutoReply,
                   onApplyRewrite: _applyRewrite,
-                  isFeedbackLoading: _isAssistLoading,
-                  feedbackError: _assistError,
-                  feedbackResult: _assistResponse,
+                  isFeedbackLoading: _isFeedbackLoading,
+                  isAutoReplyLoading: _isAutoReplyLoading,
+                  feedbackError: _feedbackError,
+                  autoReplyError: _autoReplyError,
+                  shouldFeedback: _shouldFeedback,
+                  feedbackText: _feedbackText,
+                  feedbackReason: _feedbackReason,
+                  feedbackRewrite: _feedbackRewrite,
+                  analysisSummary: _analysisSummary,
+                  debugSummary: _debugSummary,
                 ),
               ],
             ),

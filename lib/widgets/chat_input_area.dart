@@ -1,25 +1,40 @@
 import 'package:flutter/material.dart';
 import '../constants/app_style.dart';
-import '../services/llm_assist_service.dart';
 
 class ChatInputArea extends StatefulWidget {
   final TextEditingController controller;
   final VoidCallback onSend;
-  final VoidCallback? onRequestFeedback;
+  final VoidCallback? onFeedbackPressed;
+  final VoidCallback? onAutoReplyPressed;
   final VoidCallback? onApplyRewrite;
   final bool isFeedbackLoading;
+  final bool isAutoReplyLoading;
   final String? feedbackError;
-  final LlmAssistResponse? feedbackResult;
+  final String? autoReplyError;
+  final bool shouldFeedback;
+  final String? feedbackText;
+  final String? feedbackReason;
+  final String? feedbackRewrite;
+  final String? analysisSummary;
+  final String? debugSummary;
 
   const ChatInputArea({
     super.key,
     required this.controller,
     required this.onSend,
-    this.onRequestFeedback,
+    this.onFeedbackPressed,
+    this.onAutoReplyPressed,
     this.onApplyRewrite,
     this.isFeedbackLoading = false,
+    this.isAutoReplyLoading = false,
     this.feedbackError,
-    this.feedbackResult,
+    this.autoReplyError,
+    this.shouldFeedback = false,
+    this.feedbackText,
+    this.feedbackReason,
+    this.feedbackRewrite,
+    this.analysisSummary,
+    this.debugSummary,
   });
 
   @override
@@ -38,8 +53,13 @@ class _ChatInputAreaState extends State<ChatInputArea> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (widget.isFeedbackLoading ||
+                widget.isAutoReplyLoading ||
                 widget.feedbackError != null ||
-                widget.feedbackResult != null)
+                widget.autoReplyError != null ||
+                widget.feedbackText != null ||
+                widget.feedbackReason != null ||
+                widget.feedbackRewrite != null ||
+                widget.analysisSummary != null)
               Container(
                 width: double.infinity,
                 margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
@@ -57,9 +77,25 @@ class _ChatInputAreaState extends State<ChatInputArea> {
                           fontWeight: FontWeight.w600,
                         ),
                       )
+                    : widget.isAutoReplyLoading
+                    ? const Text(
+                        '자동 응답을 생성하는 중...',
+                        style: TextStyle(
+                          color: AppStyle.primaryBlue,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      )
                     : widget.feedbackError != null
                     ? Text(
                         widget.feedbackError!,
+                        style: const TextStyle(
+                          color: Colors.redAccent,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      )
+                    : widget.autoReplyError != null
+                    ? Text(
+                        widget.autoReplyError!,
                         style: const TextStyle(
                           color: Colors.redAccent,
                           fontWeight: FontWeight.w600,
@@ -143,13 +179,13 @@ class _ChatInputAreaState extends State<ChatInputArea> {
                     _buildAiOptionButton(
                       "💬 대화 피드백 받기",
                       Icons.auto_awesome_motion,
-                      widget.onRequestFeedback ?? () {},
+                      widget.onFeedbackPressed ?? () {},
                     ),
                     const SizedBox(height: 10),
                     _buildAiOptionButton(
                       "✨ 자동 응답 생성",
                       Icons.psychology_outlined,
-                      () {},
+                      widget.onAutoReplyPressed ?? () {},
                     ),
                   ],
                 ),
@@ -162,25 +198,34 @@ class _ChatInputAreaState extends State<ChatInputArea> {
   }
 
   Widget _buildFeedbackCard() {
-    final feedback = widget.feedbackResult;
-    if (feedback == null) {
-      return const SizedBox.shrink();
-    }
-
-    if (!feedback.shouldFeedback) {
-      return const Text(
-        '현재 문장은 충분히 자연스러워 추가 피드백이 필요하지 않습니다.',
-        style: TextStyle(
-          color: Colors.black54,
-          fontWeight: FontWeight.w500,
-        ),
-      );
-    }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (feedback.feedback != null && feedback.feedback!.isNotEmpty) ...[
+        const Text(
+          'AI 피드백',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: AppStyle.primaryBlue,
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (!widget.shouldFeedback &&
+            widget.analysisSummary != null)
+          Text(
+            widget.analysisSummary!,
+            style: TextStyle(
+              color: Colors.black54,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        if (!widget.shouldFeedback &&
+            widget.analysisSummary != null &&
+            (widget.feedbackText != null ||
+                widget.feedbackReason != null ||
+                widget.feedbackRewrite != null))
+          const SizedBox(height: 10),
+        if (widget.feedbackText != null && widget.feedbackText!.isNotEmpty) ...[
           const Text(
             '피드백',
             style: TextStyle(
@@ -190,10 +235,10 @@ class _ChatInputAreaState extends State<ChatInputArea> {
             ),
           ),
           const SizedBox(height: 4),
-          Text(feedback.feedback!),
+          Text(widget.feedbackText!),
           const SizedBox(height: 10),
         ],
-        if (feedback.reason != null && feedback.reason!.isNotEmpty) ...[
+        if (widget.feedbackReason != null && widget.feedbackReason!.isNotEmpty) ...[
           const Text(
             '이유',
             style: TextStyle(
@@ -203,10 +248,10 @@ class _ChatInputAreaState extends State<ChatInputArea> {
             ),
           ),
           const SizedBox(height: 4),
-          Text(feedback.reason!),
+          Text(widget.feedbackReason!),
           const SizedBox(height: 10),
         ],
-        if (feedback.rewrite != null && feedback.rewrite!.isNotEmpty) ...[
+        if (widget.feedbackRewrite != null && widget.feedbackRewrite!.isNotEmpty) ...[
           const Text(
             '추천 답장',
             style: TextStyle(
@@ -216,13 +261,23 @@ class _ChatInputAreaState extends State<ChatInputArea> {
             ),
           ),
           const SizedBox(height: 4),
-          Text(feedback.rewrite!),
+          Text(widget.feedbackRewrite!),
           const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton(
               onPressed: widget.onApplyRewrite,
               child: const Text('추천 답장 사용'),
+            ),
+          ),
+        ],
+        if (widget.debugSummary != null && widget.debugSummary!.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            widget.debugSummary!,
+            style: const TextStyle(
+              fontSize: 11,
+              color: Colors.black45,
             ),
           ),
         ],

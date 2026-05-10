@@ -1,118 +1,240 @@
-// widgets/profile_modal.dart
 import 'package:flutter/material.dart';
+import '../constants/app_style.dart';
 import '../models/user_profile.dart';
 
 class ProfileModal {
-  static void show(BuildContext context, UserProfile user) {
+  static void show(
+    BuildContext context,
+    UserProfile user, {
+    String? actionLabel,
+    VoidCallback? onActionPressed,
+  }) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      backgroundColor: Colors.transparent,
       builder: (context) {
-        // 내부 상태 변화(토글)를 위해 StatefulBuilder 사용
         bool showSubProfile = false;
 
         return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setState) {
-            return Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircleAvatar(
-                    radius: 40,
-                    backgroundColor: Colors.grey[200],
-                    child: Icon(
-                      Icons.person,
-                      size: 40,
-                      color: Colors.grey[700],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    user.name,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    user.statusMessage,
-                    style: const TextStyle(color: Colors.grey),
-                  ),
-                  const SizedBox(height: 24),
+          builder: (context, setState) {
+            final avatarColor = AppStyle.getAvatarColor(user.name);
+            final initial = AppStyle.getInitial(user.name);
 
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: user.isSharingPersonality
-                            ? Colors.amber[300]
-                            : Colors.grey[300],
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+            return Container(
+              decoration: const BoxDecoration(
+                color: AppStyle.surface,
+                borderRadius:
+                    BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              child: SafeArea(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Handle
+                    Container(
+                      width: 36,
+                      height: 4,
+                      margin: const EdgeInsets.only(top: 12, bottom: 24),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2),
                       ),
-                      onPressed: user.isSharingPersonality
-                          ? () =>
-                                setState(() => showSubProfile = !showSubProfile)
-                          : null,
-                      child: Text(
-                        user.isSharingPersonality
-                            ? (showSubProfile
-                                  ? '성격 프로필 닫기 🔼'
-                                  : '🌟 성격 프로필 보기 🔽')
-                            : '🔒 성격 프로필 비공개',
-                        style: const TextStyle(
-                          color: Colors.black87,
-                          fontWeight: FontWeight.bold,
+                    ),
+                    // Avatar
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        color: avatarColor,
+                        borderRadius: BorderRadius.circular(26),
+                      ),
+                      child: Center(
+                        child: Text(
+                          initial,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 36,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-
-                  // --- [ 서브 프로필 상세 (듀오링고 스타일) ] ---
-                  if (showSubProfile && user.personalityStats != null) ...[
                     const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.amber[50],
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.amber, width: 2),
+                    Text(
+                      user.name,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: AppStyle.textPrimary,
+                        letterSpacing: -0.5,
                       ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "@${user.userId}",
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppStyle.textSecondary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (user.statusMessage.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Padding(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 32),
+                        child: Text(
+                          user.statusMessage,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: AppStyle.textSecondary,
+                            height: 1.4,
+                          ),
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 28),
+                    // Action buttons
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
                       child: Column(
                         children: [
-                          Text(
-                            user.characterAction ?? "🧐",
-                            style: const TextStyle(fontSize: 50),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '"${user.characterDesc ?? ""}"',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 16),
-                          _buildStatBar(
-                            '지배성 (Dominance)',
-                            user.personalityStats!['dominance'] ?? 0,
-                            Colors.orange,
-                          ),
-                          const SizedBox(height: 8),
-                          _buildStatBar(
-                            '친화성 (Affiliation)',
-                            user.personalityStats!['affiliation'] ?? 0,
-                            Colors.green,
+                          if (actionLabel != null &&
+                              onActionPressed != null) ...[
+                            SizedBox(
+                              width: double.infinity,
+                              height: 50,
+                              child: ElevatedButton.icon(
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                  onActionPressed();
+                                },
+                                icon: const Icon(
+                                    Icons.chat_bubble_rounded,
+                                    size: 18),
+                                label: Text(actionLabel),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppStyle.primary,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius:
+                                        BorderRadius.circular(14),
+                                  ),
+                                  textStyle: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                          ],
+                          // Personality profile button
+                          SizedBox(
+                            width: double.infinity,
+                            height: 50,
+                            child: ElevatedButton.icon(
+                              onPressed: user.isSharingPersonality
+                                  ? () => setState(
+                                      () => showSubProfile = !showSubProfile)
+                                  : null,
+                              icon: Icon(
+                                user.isSharingPersonality
+                                    ? (showSubProfile
+                                        ? Icons.expand_less_rounded
+                                        : Icons.insights_rounded)
+                                    : Icons.lock_outline_rounded,
+                                size: 18,
+                              ),
+                              label: Text(
+                                user.isSharingPersonality
+                                    ? (showSubProfile
+                                        ? '성격 프로필 닫기'
+                                        : '성격 프로필 보기')
+                                    : '성격 프로필 비공개',
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: user.isSharingPersonality
+                                    ? const Color(0xFFFFFBEB)
+                                    : AppStyle.surfaceVariant,
+                                foregroundColor: user.isSharingPersonality
+                                    ? AppStyle.characterBoxText
+                                    : AppStyle.textTertiary,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius:
+                                      BorderRadius.circular(14),
+                                  side: BorderSide(
+                                    color: user.isSharingPersonality
+                                        ? AppStyle.characterBoxText
+                                            .withValues(alpha: 0.3)
+                                        : AppStyle.border,
+                                  ),
+                                ),
+                                textStyle: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
                           ),
                         ],
                       ),
                     ),
+                    // Personality stats
+                    if (showSubProfile && user.personalityStats != null) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        margin:
+                            const EdgeInsets.symmetric(horizontal: 24),
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFBEB),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: AppStyle.characterBoxText
+                                .withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              user.characterAction ?? "🧐",
+                              style: const TextStyle(fontSize: 44),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '"${user.characterDesc ?? ""}"',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: AppStyle.characterBoxText,
+                                fontSize: 14,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 16),
+                            _buildStatBar(
+                              '지배성',
+                              user.personalityStats!['dominance'] ?? 0,
+                              Colors.orange,
+                            ),
+                            const SizedBox(height: 10),
+                            _buildStatBar(
+                              '친화성',
+                              user.personalityStats!['affiliation'] ?? 0,
+                              Colors.green,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 28),
                   ],
-                  const SizedBox(height: 20),
-                ],
+                ),
               ),
             );
           },
@@ -125,21 +247,35 @@ class ProfileModal {
     return Row(
       children: [
         SizedBox(
-          width: 120,
+          width: 56,
           child: Text(
             label,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: AppStyle.textSecondary,
+            ),
           ),
         ),
+        const SizedBox(width: 10),
         Expanded(
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(999),
             child: LinearProgressIndicator(
               value: value / 100,
-              backgroundColor: Colors.grey[300],
+              backgroundColor: Colors.grey[200],
               color: color,
-              minHeight: 10,
+              minHeight: 8,
             ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          '${value.toInt()}',
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: AppStyle.textSecondary,
           ),
         ),
       ],

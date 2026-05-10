@@ -15,49 +15,127 @@ class ChatDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Drawer(
+      backgroundColor: AppStyle.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.horizontal(left: Radius.circular(24)),
+      ),
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.all(20.0),
-              child: Text(
-                "대화 상대",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "대화 상대",
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: AppStyle.textPrimary,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "${participants.length}명 참여 중",
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppStyle.textSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
             ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: Divider(color: AppStyle.divider, height: 1),
+            ),
+            const SizedBox(height: 8),
             Expanded(
               child: ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 4),
                 itemCount: participants.length,
-                itemBuilder: (context, index) {
-                  return _buildDrawerUserTile(participants[index]);
-                },
+                itemBuilder: (context, index) =>
+                    _buildParticipantTile(participants[index]),
               ),
             ),
-            const Divider(),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: Divider(color: AppStyle.divider, height: 1),
+            ),
             ListTile(
-              leading: const Icon(Icons.add, color: AppStyle.primaryBlue),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+              leading: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppStyle.primaryLight,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.person_add_rounded,
+                    color: AppStyle.primary, size: 20),
+              ),
               title: const Text(
                 "대화 상대 초대",
-                style: TextStyle(color: AppStyle.primaryBlue),
+                style: TextStyle(
+                  color: AppStyle.primary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
               ),
               onTap: onInvite,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildDrawerUserTile(UserProfile user) {
+  Widget _buildParticipantTile(UserProfile user) {
+    final avatarColor = AppStyle.getAvatarColor(user.name);
+    final initial = AppStyle.getInitial(user.name);
+
     return ListTile(
-      leading: const CircleAvatar(
-        radius: 15,
-        backgroundColor: AppStyle.primaryBlue,
-        child: Icon(Icons.person, size: 18, color: Colors.white),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 20, vertical: 3),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: avatarColor,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: Text(
+            initial,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
       ),
-      title: Text(user.name, style: const TextStyle(fontSize: 14)),
+      title: Text(
+        user.name,
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: AppStyle.textPrimary,
+        ),
+      ),
+      subtitle: Text(
+        "@${user.userId}",
+        style: const TextStyle(
+          fontSize: 12,
+          color: AppStyle.textSecondary,
+        ),
+      ),
     );
   }
 }

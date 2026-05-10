@@ -40,6 +40,7 @@ class AiFeedbackService {
     required List<AiFeedbackRecentMessage> recentMessages,
     required String partnerLastMessage,
     required String draft,
+    String registerMode = 'casual',
   }) async {
     try {
       final response = await http.post(
@@ -49,6 +50,7 @@ class AiFeedbackService {
           'recentMessages': recentMessages.map((message) => message.toJson()).toList(),
           'partnerLastMessage': partnerLastMessage,
           'draft': draft,
+          'registerMode': registerMode,
         }),
       );
 
@@ -71,6 +73,7 @@ class AiFeedbackService {
     required List<AiFeedbackRecentMessage> recentMessages,
     required String partnerLastMessage,
     required String draft,
+    Map<String, dynamic>? llmCandidatePayload,
   }) async {
     try {
       final response = await http.post(
@@ -80,6 +83,7 @@ class AiFeedbackService {
           'recentMessages': recentMessages.map((message) => message.toJson()).toList(),
           'partnerLastMessage': partnerLastMessage,
           'draft': draft,
+          'llmCandidatePayload': llmCandidatePayload,
         }),
       );
 
@@ -101,6 +105,7 @@ class AiFeedbackService {
   Future<AiAutoReplyResponse> generateAutoReply({
     required List<AiFeedbackRecentMessage> recentMessages,
     required String partnerLastMessage,
+    String registerMode = 'casual',
   }) async {
     try {
       final response = await http.post(
@@ -109,6 +114,7 @@ class AiFeedbackService {
         body: jsonEncode({
           'recentMessages': recentMessages.map((message) => message.toJson()).toList(),
           'partnerLastMessage': partnerLastMessage,
+          'registerMode': registerMode,
         }),
       );
 

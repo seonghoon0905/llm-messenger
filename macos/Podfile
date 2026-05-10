@@ -39,4 +39,16 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_macos_build_settings(target)
   end
+
+  frameworks_script = File.join(__dir__, 'Pods', 'Target Support Files', 'Pods-Runner', 'Pods-Runner-frameworks.sh')
+  if File.exist?(frameworks_script)
+    script = File.read(frameworks_script)
+    strip_command = '  /usr/bin/xattr -cr "${destination}/$(basename "$1")" || true'
+    rsync_command = '  rsync --delete -av "${RSYNC_PROTECT_TMP_FILES[@]}" --links --filter "- CVS/" --filter "- .svn/" --filter "- .git/" --filter "- .hg/" --filter "- Headers" --filter "- PrivateHeaders" --filter "- Modules" "${source}" "${destination}"'
+
+    unless script.include?(strip_command)
+      script = script.sub(rsync_command, "#{rsync_command}\n#{strip_command}")
+      File.write(frameworks_script, script)
+    end
+  end
 end

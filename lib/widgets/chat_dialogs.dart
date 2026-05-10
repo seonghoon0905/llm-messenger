@@ -1,47 +1,79 @@
 import 'package:flutter/material.dart';
+import '../constants/app_style.dart';
+import '../models/user_profile.dart';
 
 class ChatDialogs {
-  // 1. 새 채팅방 생성 다이얼로그
+  // 1. 새 채팅방 생성 다이얼로그 (이름 + 친구 선택)
   static void showCreateChatDialog({
     required BuildContext context,
-    required Function(String title, String relation) onCreate,
+    required List<UserProfile> friends,
+    required Function(String title, String relation, List<String> inviteeIds) onCreate,
   }) {
     String newTitle = "";
-    String selectedRelation = "친구";
-    final List<String> relations = ["가족", "부부", "친구", "연인", "인연", "고향", "학교", "회사", "군대", "인터넷 커뮤니티", "기타"];
+    final Set<String> selectedIds = {};
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('새 채팅방 정보'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                decoration: const InputDecoration(hintText: "대화방 이름"),
-                onChanged: (value) => newTitle = value,
-              ),
-              const SizedBox(height: 16),
-              DropdownButton<String>(
-                isExpanded: true,
-                value: selectedRelation,
-                items: relations.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
-                onChanged: (value) {
-                  if (value != null) setDialogState(() => selectedRelation = value);
-                },
-              ),
-            ],
+          title: const Text('새 채팅방', style: TextStyle(fontWeight: FontWeight.w700)),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    hintText: "대화방 이름",
+                    isDense: true,
+                  ),
+                  onChanged: (v) => setDialogState(() => newTitle = v),
+                ),
+                if (friends.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  const Text(
+                    '초대할 친구',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppStyle.textSecondary),
+                  ),
+                  const SizedBox(height: 6),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 220),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: friends.length,
+                      itemBuilder: (context, index) {
+                        final friend = friends[index];
+                        final selected = selectedIds.contains(friend.userId);
+                        return CheckboxListTile(
+                          value: selected,
+                          activeColor: AppStyle.primary,
+                          onChanged: (v) => setDialogState(() {
+                            if (v == true) selectedIds.add(friend.userId);
+                            else selectedIds.remove(friend.userId);
+                          }),
+                          title: Text(friend.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                          subtitle: Text('@${friend.userId}', style: const TextStyle(fontSize: 11)),
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
             TextButton(
-              onPressed: () {
-                if (newTitle.isNotEmpty) {
-                  onCreate(newTitle, selectedRelation);
-                  Navigator.pop(context);
-                }
-              },
+              onPressed: newTitle.trim().isNotEmpty
+                  ? () {
+                      onCreate(newTitle.trim(), '기타', selectedIds.toList());
+                      Navigator.pop(context);
+                    }
+                  : null,
               child: const Text('생성'),
             ),
           ],
@@ -56,47 +88,29 @@ class ChatDialogs {
     required String initialRelation,
     required Function(String newTitle, String newRelation) onSave,
   }) {
-    TextEditingController editController = TextEditingController(text: initialTitle);
-    String selectedRelation = initialRelation;
-    final List<String> relations = ["가족", "부부", "친구", "연인", "인연", "고향", "학교", "회사", "군대", "인터넷 커뮤니티", "기타"];
+    final editController = TextEditingController(text: initialTitle);
 
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('채팅방 정보 수정'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: editController,
-                decoration: const InputDecoration(labelText: "이름"),
-                autofocus: true,
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                decoration: const InputDecoration(labelText: "관계"),
-                initialValue: selectedRelation,
-                items: relations.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
-                onChanged: (value) {
-                  if (value != null) setDialogState(() => selectedRelation = value);
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
-            TextButton(
-              onPressed: () {
-                if (editController.text.isNotEmpty) {
-                  onSave(editController.text, selectedRelation);
-                  Navigator.pop(context);
-                }
-              },
-              child: const Text('저장'),
-            ),
-          ],
+      builder: (context) => AlertDialog(
+        title: const Text('채팅방 이름 수정'),
+        content: TextField(
+          controller: editController,
+          decoration: const InputDecoration(labelText: "이름"),
+          autofocus: true,
         ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+          TextButton(
+            onPressed: () {
+              if (editController.text.isNotEmpty) {
+                onSave(editController.text, initialRelation);
+                Navigator.pop(context);
+              }
+            },
+            child: const Text('저장'),
+          ),
+        ],
       ),
     );
   }

@@ -4,11 +4,15 @@ import 'package:http/http.dart' as http;
 import 'dart:async';
 import '../models/chat_room.dart';
 import '../models/message.dart';
+import '../models/user_profile.dart';
 import '../constants/app_style.dart';
 import '../widgets/chat_dialogs.dart';
 import 'tabs/profile_tab.dart';
 import 'tabs/chat_list_tab.dart';
+import 'tabs/settings_tab.dart';
 import '../services/db_helper.dart';
+import '../services/api_service.dart';
+import 'login_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -21,6 +25,7 @@ class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   final List<ChatRoom> _chatRooms = [];
   StreamSubscription? _socketSubscription;
+  final ApiService _apiService = ApiService();
 
   @override
   void initState() {
@@ -29,7 +34,13 @@ class _MainScreenState extends State<MainScreen> {
       AppStyle.connectSocket(AppStyle.myLoggedInId!);
     }
     _initGlobalSocket();
-    _syncRoomsFromServer().then((_) => _loadChatRooms());
+    _syncInitialData();
+  }
+
+  Future<void> _syncInitialData() async {
+    await _syncRoomsFromServer();
+    await _syncFriendsFromServer();
+    await _loadChatRooms();
   }
 
   Future<void> _syncRoomsFromServer() async {
@@ -45,20 +56,34 @@ class _MainScreenState extends State<MainScreen> {
           final serverRoom = ChatRoom(
             id: roomData['room_id'],
             title: roomData['title'],
-            relation: roomData['relation'],
+            relation: roomData['relation'] ?? '기타',
             lastMessage: "채팅방에 참여했습니다.",
             lastMessageTime: DateTime.now(),
-            messages: [],
           );
-          try {
-            await DBHelper().insertChatRoom(serverRoom);
-          } catch (e) {
-            debugPrint("방 존재: \$e");
-          } // 이미 존재하면 무시
+          // 기존 방 데이터(lastMessageTime 등)를 덮어쓰지 않음
+          await DBHelper().insertChatRoomIfAbsent(serverRoom);
         }
       }
     } catch (e) {
       debugPrint("서버 동기화 실패: $e");
+    }
+  }
+
+  Future<void> _syncFriendsFromServer() async {
+    if (AppStyle.myLoggedInId == null) return;
+    try {
+      final friends = await _apiService.fetchFriends(AppStyle.myLoggedInId!);
+      for (final friend in friends) {
+        await DBHelper().insertFriend(
+          UserProfile(
+            userId: friend['user_id'] as String? ?? '',
+            name: friend['nickname'] as String? ?? friend['user_id'] as String? ?? '',
+            statusMessage: friend['status_message'] as String? ?? "상태 메시지가 없습니다.",
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("친구 동기화 실패: $e");
     }
   }
 
@@ -67,34 +92,88 @@ class _MainScreenState extends State<MainScreen> {
       _socketSubscription = AppStyle.globalStream!.listen((message) async {
         final data = jsonDecode(message);
         if (data['type'] == 'INVITE_EVENT') {
+          final myId = AppStyle.myLoggedInId ?? 'me';
+          final inviterId = data['inviter_id'] as String? ?? '';
+          final roomId = data['room_id'] as String;
           final newRoom = ChatRoom(
-            id: data['room_id'],
+            id: roomId,
             title: data['room_title'],
             relation: data['relation'] ?? "기타",
             lastMessageTime: DateTime.now(),
-            lastMessage: "${data['inviter_id']}님이 초대하셨습니다.",
-            messages: [],
+            lastMessage: "${inviterId}님이 초대하셨습니다.",
+            memberIds: [myId, if (inviterId.isNotEmpty) inviterId],
           );
-          try {
-            await DBHelper().insertChatRoom(newRoom);
-          } catch (e) {
-            debugPrint("방 존재: \$e");
+          await DBHelper().insertChatRoomIfAbsent(newRoom);
+          // 기존 방이 있으면 초대자 추가
+          final existing = await DBHelper().getChatRoomById(roomId);
+          if (existing != null && inviterId.isNotEmpty && !existing.memberIds.contains(inviterId)) {
+            final ids = [...existing.memberIds, inviterId];
+            await DBHelper().updateRoomMembers(roomId, ids);
           }
           _loadChatRooms();
           if (mounted) {
+            // 친구 DB에서 닉네임 조회, 없으면 ID 사용
+            final friends = await DBHelper().getFriends();
+            final inviterName = friends
+                    .where((f) => f.userId == inviterId)
+                    .map((f) => f.name)
+                    .firstOrNull ??
+                inviterId;
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text("$inviterName님이 초대하셨습니다!")),
+              );
+            }
+          }
+        } else if (data['type'] == 'FRIEND_EVENT') {
+          final friend = UserProfile(
+            userId: data['user_id'] ?? '',
+            name: data['nickname'] ?? data['user_id'] ?? '',
+            statusMessage: data['status_message'] ?? "상태 메시지가 없습니다.",
+          );
+          await DBHelper().insertFriend(friend);
+          if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text("${data['inviter_id']}님이 초대하셨습니다!")),
+              SnackBar(content: Text("${friend.name}님이 친구 목록에 추가되었습니다.")),
             );
           }
+        } else if (data['type'] == 'MEMBER_JOINED') {
+          final roomId = data['room_id'] as String? ?? '';
+          final userId = data['user_id'] as String? ?? '';
+          final nickname = data['nickname'] as String? ?? userId;
+          if (roomId.isNotEmpty && userId.isNotEmpty) {
+            final room = await DBHelper().getChatRoomById(roomId);
+            if (room != null && !room.memberIds.contains(userId)) {
+              await DBHelper().updateRoomMembers(roomId, [...room.memberIds, userId]);
+            }
+            final sysMsg = Message(
+              text: '$nickname님이 입장하셨습니다.',
+              sender: '__system__',
+              timestamp: DateTime.tryParse(data['timestamp'] ?? '') ?? DateTime.now(),
+            );
+            await DBHelper().insertMessage(roomId, sysMsg);
+            _loadChatRooms();
+          }
         } else if (data['content'] != null && data['room_id'] != null) {
-          // Save incoming message to DB and update list
+          final roomId = data['room_id'] as String;
+          final timestamp = DateTime.parse(
+            data['timestamp'] ?? DateTime.now().toIso8601String(),
+          );
+          final shouldIncrementUnread = AppStyle.currentOpenRoomId != roomId;
+          await DBHelper().upsertIncomingChatRoom(
+            roomId: roomId,
+            title: data['room_title'] ?? data['sender_nickname'] ?? data['sender_id'] ?? roomId,
+            relation: data['relation'] ?? '기타',
+            timestamp: timestamp,
+            incrementUnread: shouldIncrementUnread,
+          );
           final incomingMsg = Message(
             text: data['content'] ?? "",
             sender: data['sender_nickname'] ?? data['sender_id'] ?? "unknown",
-            timestamp: DateTime.parse(data['timestamp'] ?? DateTime.now().toIso8601String()),
+            timestamp: timestamp,
           );
-          await DBHelper().insertMessage(data['room_id'], incomingMsg);
-          _loadChatRooms(); // Update UI list
+          await DBHelper().insertMessage(roomId, incomingMsg);
+          _loadChatRooms();
         }
       });
     }
@@ -106,38 +185,41 @@ class _MainScreenState extends State<MainScreen> {
     super.dispose();
   }
 
-  // Load Local Data
   Future<void> _loadChatRooms() async {
-    // Show local data only if user is logged in
     if (AppStyle.myLoggedInId == null) return;
-
-    // Fetch from local DB
     final rooms = await DBHelper().getChatRooms();
-
     setState(() {
       _chatRooms.clear();
       _chatRooms.addAll(rooms);
-      // Sort by recent message time
       _chatRooms.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
     });
   }
 
-  // Create New Chat Room (Local)
-  void _createNewChat(String title, String relation) async {
+  void _createNewChat(String title, String relation, List<String> inviteeIds) async {
+    final myId = AppStyle.myLoggedInId ?? 'me';
+    final roomId = DateTime.now().millisecondsSinceEpoch.toString();
+    final memberIds = [myId, ...inviteeIds];
     final newRoom = ChatRoom(
-      // Generate unique string ID
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: roomId,
       title: title,
       relation: relation,
       lastMessageTime: DateTime.now(),
-      messages: [],
+      memberIds: memberIds,
     );
-
     try {
-      // Save to local DB
       await DBHelper().insertChatRoom(newRoom);
-
-      // Update UI
+      // 선택한 친구들에게 INVITE 전송
+      for (final inviteeId in inviteeIds) {
+        final invitePacket = {
+          "type": "INVITE",
+          "room_id": roomId,
+          "invitee_id": inviteeId,
+          "room_title": title,
+          "relation": relation,
+          "timestamp": DateTime.now().toIso8601String(),
+        };
+        AppStyle.channel?.sink.add(jsonEncode(invitePacket));
+      }
       await _loadChatRooms();
     } catch (e) {
       debugPrint("방 생성 실패: $e");
@@ -151,104 +233,224 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Tab pages
     final List<Widget> pages = [
-      const ProfileTab(),
+      ProfileTab(onRoomsChanged: _loadChatRooms),
       ChatListTab(
         chatRooms: _chatRooms,
         onLongPress: (index) => _showChatOptions(index),
         onReturnFromChat: () => _loadChatRooms(),
       ),
+      SettingsTab(onLogout: _handleLogout),
     ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'OPEN SW TEMP PROJECT',
-          style: AppStyle.appBarTitleStyle,
-        ),
-        backgroundColor: AppStyle.primaryBlue,
-        elevation: 2,
-        centerTitle: true,
-      ),
+      backgroundColor: AppStyle.backgroundGrey,
       body: pages[_selectedIndex],
       floatingActionButton: _selectedIndex == 1
           ? FloatingActionButton(
-              onPressed: () => ChatDialogs.showCreateChatDialog(
-                context: context,
-                onCreate: (title, relation) => _createNewChat(title, relation),
+              onPressed: () async {
+                final friends = await DBHelper().getFriends();
+                if (!context.mounted) return;
+                ChatDialogs.showCreateChatDialog(
+                  context: context,
+                  friends: friends,
+                  onCreate: (title, relation, inviteeIds) =>
+                      _createNewChat(title, relation, inviteeIds),
+                );
+              },
+              backgroundColor: AppStyle.primary,
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
               ),
-              backgroundColor: AppStyle.primaryBlue,
-              child: const Icon(Icons.add_comment, color: Colors.white),
+              child: const Icon(Icons.edit_rounded, color: Colors.white, size: 22),
             )
           : null,
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        onTap: (index) => setState(() => _selectedIndex = index),
-        selectedItemColor: AppStyle.primaryBlue,
-        unselectedItemColor: Colors.grey,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: '프로필'),
-          BottomNavigationBarItem(icon: Icon(Icons.chat), label: '채팅'),
-        ],
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: AppStyle.divider, width: 0.5)),
+        ),
+        child: NavigationBar(
+          selectedIndex: _selectedIndex,
+          onDestinationSelected: (index) =>
+              setState(() => _selectedIndex = index),
+          backgroundColor: AppStyle.surface,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          height: 64,
+          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.people_outline_rounded, size: 24),
+              selectedIcon: Icon(Icons.people_rounded, size: 24),
+              label: '친구',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.chat_bubble_outline_rounded, size: 24),
+              selectedIcon: Icon(Icons.chat_bubble_rounded, size: 24),
+              label: '채팅',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.settings_outlined, size: 24),
+              selectedIcon: Icon(Icons.settings_rounded, size: 24),
+              label: '설정',
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  // Chat Room Options (Edit/Delete)
+  void _handleLogout() {
+    AppStyle.disconnectSocket();
+    AppStyle.globalStream = null;
+    AppStyle.myLoggedInId = null;
+    AppStyle.myProfile = null;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+      (route) => false,
+    );
+  }
+
   void _showChatOptions(int index) {
     final room = _chatRooms[index];
     showModalBottomSheet(
       context: context,
+      backgroundColor: AppStyle.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.edit, color: AppStyle.primaryBlue),
-              title: const Text('채팅방 정보 수정'),
-              onTap: () {
-                Navigator.pop(context);
-                ChatDialogs.showEditChatDialog(
-                  context: context,
-                  initialTitle: room.title,
-                  initialRelation: room.relation,
-                  onSave: (newTitle, newRelation) async {
-                    // Update memory data
-                    setState(() {
-                      room.title = newTitle;
-                      room.relation = newRelation;
-                    });
-                    // Update local DB
-                    await DBHelper().updateChatRoom(room);
-                  },
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete, color: Colors.red),
-              title: const Text('채팅방 삭제'),
-              onTap: () {
-                Navigator.pop(context);
-                ChatDialogs.showDeleteDialog(
-                  context: context,
-                  onDelete: () async {
-                    // Delete from local DB
-                    await DBHelper().deleteChatRoom(room.id);
-                    // Refresh list
-                    await _loadChatRooms();
-
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('대화방이 삭제되었습니다.')),
-                    );
-                  },
-                );
-              },
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              ListTile(
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppStyle.primaryLight,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.edit_rounded,
+                      color: AppStyle.primary, size: 20),
+                ),
+                title: const Text('채팅방 정보 수정',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                onTap: () {
+                  Navigator.pop(context);
+                  ChatDialogs.showEditChatDialog(
+                    context: context,
+                    initialTitle: room.title,
+                    initialRelation: room.relation,
+                    onSave: (newTitle, newRelation) async {
+                      setState(() {
+                        room.title = newTitle;
+                        room.relation = newRelation;
+                      });
+                      await DBHelper().updateChatRoom(room);
+                    },
+                  );
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.exit_to_app_rounded,
+                      color: Colors.orange, size: 20),
+                ),
+                title: const Text('채팅방 나가기',
+                    style: TextStyle(
+                        color: Colors.orange, fontWeight: FontWeight.w600)),
+                onTap: () {
+                  Navigator.pop(context);
+                  showDialog(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('채팅방 나가기',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                      content: const Text('채팅방을 나가면 대화 내용이 모두 삭제됩니다.'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('취소'),
+                        ),
+                        TextButton(
+                          onPressed: () async {
+                            Navigator.pop(ctx);
+                            final leavePacket = {
+                              "type": "LEAVE",
+                              "room_id": room.id,
+                              "timestamp": DateTime.now().toIso8601String(),
+                            };
+                            AppStyle.channel?.sink
+                                .add(jsonEncode(leavePacket));
+                            await DBHelper().deleteChatRoom(room.id);
+                            await _loadChatRooms();
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('채팅방을 나갔습니다.')),
+                            );
+                          },
+                          child: const Text('나가기',
+                              style: TextStyle(
+                                  color: Colors.orange,
+                                  fontWeight: FontWeight.w600)),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.delete_rounded,
+                      color: Colors.redAccent, size: 20),
+                ),
+                title: const Text('채팅방 삭제 (로컬)',
+                    style: TextStyle(
+                        color: Colors.redAccent, fontWeight: FontWeight.w600)),
+                onTap: () {
+                  Navigator.pop(context);
+                  ChatDialogs.showDeleteDialog(
+                    context: context,
+                    onDelete: () async {
+                      await DBHelper().deleteChatRoom(room.id);
+                      await _loadChatRooms();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('대화방이 삭제되었습니다.')),
+                      );
+                    },
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );

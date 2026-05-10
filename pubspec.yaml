@@ -66,10 +66,6 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
@@ -97,7 +93,16 @@ flutter:
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
   assets:
-    - assets/NotoColorEmoji.ttf # assets 폴더도 등록해야 함
+    - icon/책임적.png
+    - icon/지배적.png
+    - icon/독재적.png
+    - icon/협력적.png
+    - icon/평범적.png
+    - icon/의심적.png
+    - icon/순응적.png
+    - icon/의존적.png
+    - icon/반항적.png
+    - assets/NotoColorEmoji.ttf
 
   fonts:
     - family: NotoColorEmoji # 폰트 이름 정의

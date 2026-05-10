@@ -5,14 +5,20 @@ class ChatRoom {
   String title;
   String relation;
   DateTime lastMessageTime;
-  String? lastMessage; // 이 필드가 있어야 목록에 표시됩니다!
+  String? lastMessage;
+  int unreadCount;
+  List<String> memberIds; // 참여자 user ID 목록
 
   ChatRoom({
     required this.id,
     required this.title,
     required this.relation,
     required this.lastMessageTime,
-    this.lastMessage, // 생성자 추가
+    this.lastMessage,
+    this.unreadCount = 0,
+    List<String>? memberIds,
     List<Message>? messages,
-  });
+  }) : memberIds = memberIds ?? [];
+
+  int get memberCount => memberIds.isEmpty ? 1 : memberIds.length;
 }

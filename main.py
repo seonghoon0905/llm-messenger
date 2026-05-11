@@ -4,7 +4,6 @@ from typing import List, Dict, Optional, Any
 import sqlite3
 import json
 import os
-import re
 import ssl
 import urllib.request
 import urllib.error
@@ -576,46 +575,30 @@ class AnalyzeDraftRequest(BaseModel):
 
 def _build_llm_assist_system_prompt() -> str:
     return """
-당신은 한국어 메신저 답장을 자연스럽게 다듬어주는 조용한 코치입니다.
+당신은 한국어 메신저 답장을 다듬는 코치입니다. 맥락을 보고 자연스럽게 판단하세요.
 
-최근 대화 맥락과 사용자가 작성한 draft를 보고, 이 답장을 그대로 보내도 괜찮은지 판단하세요.
-문제가 크지 않거나 충분히 자연스러우면 shouldFeedback=false로 답하세요.
+[원칙]
+1. 사용자의 핵심 의도(말하려는 내용·대화 목적)는 유지하되, 공격성·욕설·무시 표현만 부드럽게 바꿉니다.
+2. 사용자가 말하지 않은 사실·감정·약속·사과·질문을 새로 만들지 마세요. ("미안", "괜찮아?" 같은 표현 임의 추가 금지)
+3. 이미 자연스럽고 무례하지 않으면 다듬지 마세요. 짧은 단답("그냥", "응", "ㅇㅇ")도 맥락에 맞으면 그대로.
+4. 격식 모드면 존댓말, 반말 모드면 반말.
 
-다듬을 필요가 있을 때만 피드백과 추천 답장을 제공합니다.
+[피드백 필요 여부]
+- 욕설, 공격적 표현, 비꼼, 상대 감정 무시, 격식 어긋남 → shouldFeedback=true
+- 차분한 거절·짧은 단답·정상적 정보 전달 → shouldFeedback=false
 
-[의도 유지 원칙]
-추천 답장은 사용자의 핵심 의도와 정보량을 최대한 유지해야 합니다.
-여기서 "의도"란 사용자가 말하고자 하는 내용과 대화 목적을 뜻합니다.
-공격적인 말투, 비꼼, 욕설, 무시하는 표현까지 그대로 보존하라는 뜻이 아닙니다.
+[rewrite 시 주의]
+거절·선 긋기 의도는 "말하고 싶지 않다 / 개인적인 일이다"처럼 boundary는 살리고 공격성만 빼세요.
+"관심 없다 / 궁금하지 않다"처럼 의미를 뒤집지 마세요 — 핵심은 "공유하지 않겠다"이지 "흥미 없다"가 아닙니다.
 
-[표현 완화 원칙]
-draft가 공격적이거나, 차갑거나, 상대를 무시하는 표현이라면:
-- 핵심 의도(거절, 선 긋기, 회피 등)는 유지하되
-- 상대방에게 불필요한 상처를 줄 수 있는 표현은 더 차분하게 바꾸세요.
-- 예: "니 알바는 아니야" → "그건 말하고 싶지 않아."
-- 예: "너도 말 개같이 하잖아" → "나도 네 말투가 좀 불편하게 느껴졌어."
-- 예: "그래서 뭐" → "그랬구나. 많이 힘들었겠다."
+shouldFeedback=true 일 때 rewrite는 반드시 제공.
 
-[금지 사항]
-- 사용자가 말하지 않은 정보, 감정, 약속, 질문을 새로 만들지 마세요.
-- 답장을 무조건 더 친절하게 만들거나 대화를 이어가게 만들 필요는 없습니다.
-- 짧고 담백한 답장이 자연스러운 상황이면 짧고 담백하게 유지하세요.
-- 상담체, 교과서체, 번역투는 피하세요.
-
-[rewrite 규칙]
-- shouldFeedback=true인 경우, rewrite를 반드시 제공하세요.
-- rewrite는 사용자가 메신저에서 바로 보낼 수 있는 자연스러운 문장이어야 합니다.
-- 제공이 불가능한 경우에만 null로 두세요.
-
-대화 모드가 formal이면 존댓말, casual이면 자연스러운 반말을 사용하세요.
-말투만 맞추고 사용자의 핵심 의도 자체를 바꾸지는 마세요.
-
-반드시 아래 JSON 형식으로만 답하세요:
+JSON으로만 답하세요:
 {
   "shouldFeedback": boolean,
-  "feedback": "짧은 피드백 또는 null",
-  "reason": "간단한 이유 또는 null",
-  "rewrite": "추천 답장 또는 null"
+  "feedback": "왜 다듬는 게 좋은지 짧게, 없으면 null",
+  "rewrite": "그대로 보낼 수 있는 문장, 없으면 null",
+  "reason": "판단 근거 한 줄, 없으면 null"
 }
 """.strip()
 
@@ -623,13 +606,15 @@ draft가 공격적이거나, 차갑거나, 상대를 무시하는 표현이라�
 def _build_llm_assist_user_prompt(payload: LlmAssistRequest) -> str:
     candidate = payload.llmCandidatePayload or {}
 
-    # 최근 대화 맥락
+    # 최근 대화 맥락 (최근 6개로 제한)
     recent_messages = candidate.get("recentMessages") if isinstance(candidate, dict) else None
     if not isinstance(recent_messages, list):
         recent_messages = [
             {"role": m.role, "text": m.text}
             for m in payload.recentMessages
         ]
+    recent_messages = recent_messages[-6:]
+
     context_lines = []
     for m in recent_messages:
         if not isinstance(m, dict):
@@ -655,10 +640,7 @@ def _build_llm_assist_user_prompt(payload: LlmAssistRequest) -> str:
 [대화 모드]
 {mode_hint}
 
-위 맥락에서 draft가 그대로 보내도 괜찮은지 판단하세요.
-필요할 때만 사용자의 핵심 의도를 유지한 더 자연스러운 답장을 제안하세요.
-공격적이거나 무시하는 표현이 있다면, 그 의도는 유지하되 표현은 부드럽게 바꿔주세요.
-JSON 형식으로만 답하세요.
+위 정보를 보고 시스템 지시에 따라 JSON으로만 답하세요.
 """.strip()
 
 
@@ -747,15 +729,12 @@ def _contains_harsh_expression(text: str) -> bool:
 
 def _contains_distress_words(text: str) -> bool:
     distress_patterns = [
-        "힘들",
-        "지쳤",
-        "속상",
-        "우울",
-        "불안",
-        "부담",
-        "걱정",
-        "짜증나",
-        "답답",
+        "힘들", "지쳤", "속상", "우울", "불안", "부담", "걱정",
+        "짜증나", "답답",
+        "슬프", "슬픈", "슬펐",
+        "괴롭", "괴로",
+        "외로", "쓸쓸",
+        "죽고싶", "죽고 싶",
     ]
     return any(pattern in text for pattern in distress_patterns)
 
@@ -846,8 +825,6 @@ def _is_clearly_safe_to_skip_llm(
     register_mode: str,
     formal_prob: float,
     partner_speech_act: dict,
-    my_speech_act: dict,
-    partner_emotion_scores: dict,
     my_draft_emotion_scores: dict,
     emotion_shift: dict,
     negative_emotion_streak: dict,
@@ -1400,7 +1377,7 @@ def _call_openai_llm_assist(payload: LlmAssistRequest) -> dict:
     request_body = {
         "model": model_name,
         "response_format": {"type": "json_object"},
-        "temperature": 0.5,
+        "temperature": 0.3,
         "max_tokens": 500,
         "messages": [
             {"role": "system", "content": _build_llm_assist_system_prompt()},
@@ -1560,8 +1537,6 @@ def _analyze_draft_rule_based(payload: AnalyzeDraftRequest) -> dict:
             register_mode=register_mode,
             formal_prob=formal_prob,
             partner_speech_act=partner_speech,
-            my_speech_act=draft_speech,
-            partner_emotion_scores=partner_emotion,
             my_draft_emotion_scores=draft_emotion,
             emotion_shift=emotion_shift,
             negative_emotion_streak=negative_emotion_streak,
@@ -1634,14 +1609,7 @@ async def llm_assist(req: LlmAssistRequest):
             "rewrite": None,
         }
 
-    if len(draft) < 3:
-        return {
-            "shouldFeedback": False,
-            "feedback": "초안이 너무 짧아서 아직 판단하기 어렵습니다.",
-            "reason": "조금 더 구체적으로 입력하면 더 정확한 피드백을 줄 수 있습니다.",
-            "rewrite": None,
-        }
-
+    # 짧은 draft여도 GPT가 맥락을 보고 판단해야 함 (early exit 제거)
     return _call_openai_llm_assist(req)
 
 

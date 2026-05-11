@@ -67,6 +67,11 @@ class _ChatInputAreaState extends State<ChatInputArea> {
         if (event is KeyDownEvent &&
             event.logicalKey == LogicalKeyboardKey.enter &&
             !HardwareKeyboard.instance.isShiftPressed) {
+          // 한글 IME 조합 중이면 Enter를 가로채지 않음
+          // (가로채면 자음·모음 분리 버그 발생)
+          if (widget.controller.value.composing.isValid) {
+            return KeyEventResult.ignored;
+          }
           widget.onSend();
           return KeyEventResult.handled;
         }

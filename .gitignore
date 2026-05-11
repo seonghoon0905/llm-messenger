@@ -43,3 +43,13 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# 환경변수 (API 키 등 민감 정보)
+.env
+.env.local
+.env.*.local
+
+# Python 백엔드
+__pycache__/
+*.py[cod]
+auth_server.db

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../constants/app_style.dart';
 import '../../services/api_service.dart';
 import '../../services/db_helper.dart';
+
+const _kAutoFeedbackPrefKey = 'autoFeedbackEnabled';
 
 class SettingsTab extends StatefulWidget {
   final VoidCallback onLogout;
@@ -14,6 +17,28 @@ class SettingsTab extends StatefulWidget {
 
 class _SettingsTabState extends State<SettingsTab> {
   final ApiService _apiService = ApiService();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPrefs();
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        AppStyle.autoFeedbackEnabled =
+            prefs.getBool(_kAutoFeedbackPrefKey) ?? true;
+      });
+    }
+  }
+
+  Future<void> _toggleAutoFeedback(bool value) async {
+    setState(() => AppStyle.autoFeedbackEnabled = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kAutoFeedbackPrefKey, value);
+  }
 
   void _showDeleteAccountDialog() {
     showDialog(
@@ -97,6 +122,22 @@ class _SettingsTabState extends State<SettingsTab> {
         child: CustomScrollView(
           slivers: [
             SliverToBoxAdapter(child: _buildHeader()),
+            SliverToBoxAdapter(
+              child: _buildSection(
+                title: 'AI 기능',
+                children: [
+                  _buildSwitchTile(
+                    icon: Icons.auto_awesome_motion_rounded,
+                    iconColor: AppStyle.primary,
+                    iconBg: AppStyle.primaryLight,
+                    label: 'AI 자동 피드백',
+                    description: '타이핑 중단 2초 후 자동으로 피드백을 분석합니다',
+                    value: AppStyle.autoFeedbackEnabled,
+                    onChanged: _toggleAutoFeedback,
+                  ),
+                ],
+              ),
+            ),
             SliverToBoxAdapter(
               child: _buildSection(
                 title: '계정',
@@ -256,6 +297,64 @@ class _SettingsTabState extends State<SettingsTab> {
                 color: AppStyle.textTertiary, size: 20),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildSwitchTile({
+    required IconData icon,
+    required Color iconColor,
+    required Color iconBg,
+    required String label,
+    required String description,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: iconBg,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: iconColor, size: 19),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppStyle.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  description,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppStyle.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeThumbColor: Colors.white,
+            activeTrackColor: AppStyle.primary,
+          ),
+        ],
       ),
     );
   }

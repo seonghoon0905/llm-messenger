@@ -40,7 +40,7 @@ class AiFeedbackService {
     required List<AiFeedbackRecentMessage> recentMessages,
     required String partnerLastMessage,
     required String draft,
-    String registerMode = 'casual',
+    String? registerMode,
   }) async {
     try {
       final response = await http.post(
@@ -50,7 +50,7 @@ class AiFeedbackService {
           'recentMessages': recentMessages.map((message) => message.toJson()).toList(),
           'partnerLastMessage': partnerLastMessage,
           'draft': draft,
-          'registerMode': registerMode,
+          if (registerMode != null) 'registerMode': registerMode,
         }),
       );
 

@@ -298,6 +298,26 @@ class DBHelper {
         where: 'id = ?', whereArgs: [id]);
   }
 
+  Future<void> editMessageByTimestamp(String roomId, String timestamp, String newText) async {
+    final db = await database;
+    await db.update(
+      'messages',
+      {'editedText': newText},
+      where: 'roomId = ? AND timestamp = ?',
+      whereArgs: [roomId, timestamp],
+    );
+  }
+
+  Future<void> deleteMessageByTimestamp(String roomId, String timestamp) async {
+    final db = await database;
+    await db.update(
+      'messages',
+      {'isDeleted': 1},
+      where: 'roomId = ? AND timestamp = ?',
+      whereArgs: [roomId, timestamp],
+    );
+  }
+
   Future<void> markRoomMessagesAsRead(String roomId) async {
     final db = await database;
     await db.update(

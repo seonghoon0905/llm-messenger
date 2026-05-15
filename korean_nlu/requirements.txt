@@ -1,0 +1,7 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0.0
+# ML 의존성 (모델 없이 휴리스틱 fallback으로도 동작)
+torch>=2.0.0
+transformers>=4.40.0
+sentencepiece>=0.1.99

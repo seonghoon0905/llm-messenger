@@ -45,7 +45,6 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _analysisSummary;
   String? _debugSummary;
   bool _shouldFeedback = false;
-  late String _selectedRegisterMode;
 
   // New feature state
   bool _isSearching = false;
@@ -59,7 +58,6 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     AppStyle.currentOpenRoomId = widget.chatRoom.id;
-    _selectedRegisterMode = _resolveInitialRegisterMode();
     DBHelper().resetUnreadCount(widget.chatRoom.id);
     _loadMessagesFromLocal();
     _connectSocket();
@@ -147,6 +145,49 @@ class _ChatScreenState extends State<ChatScreen> {
           final data = jsonDecode(message);
           if (data['type'] == 'INVITE_EVENT') return;
 
+          // 수정 이벤트
+          if (data['type'] == 'EDIT_EVENT') {
+            if (data['room_id'] == widget.chatRoom.id) {
+              final msgTimestamp = data['msg_timestamp'] as String?;
+              final newText = data['new_text'] as String?;
+              if (msgTimestamp != null && newText != null) {
+                await DBHelper().editMessageByTimestamp(widget.chatRoom.id, msgTimestamp, newText);
+                if (mounted) {
+                  setState(() {
+                    final idx = _displayMessages.indexWhere(
+                      (m) => m.timestamp.toIso8601String() == msgTimestamp,
+                    );
+                    if (idx != -1) {
+                      _displayMessages[idx] = _displayMessages[idx].copyWith(editedText: newText);
+                    }
+                  });
+                }
+              }
+            }
+            return;
+          }
+
+          // 삭제 이벤트
+          if (data['type'] == 'DELETE_EVENT') {
+            if (data['room_id'] == widget.chatRoom.id) {
+              final msgTimestamp = data['msg_timestamp'] as String?;
+              if (msgTimestamp != null) {
+                await DBHelper().deleteMessageByTimestamp(widget.chatRoom.id, msgTimestamp);
+                if (mounted) {
+                  setState(() {
+                    final idx = _displayMessages.indexWhere(
+                      (m) => m.timestamp.toIso8601String() == msgTimestamp,
+                    );
+                    if (idx != -1) {
+                      _displayMessages[idx] = _displayMessages[idx].copyWith(isDeleted: true);
+                    }
+                  });
+                }
+              }
+            }
+            return;
+          }
+
           // 다른 멤버가 입장했을 때 시스템 메시지 표시
           if (data['type'] == 'MEMBER_JOINED') {
             if (data['room_id'] == widget.chatRoom.id) {
@@ -183,7 +224,6 @@ class _ChatScreenState extends State<ChatScreen> {
           final msgId = await DBHelper().insertMessage(widget.chatRoom.id, incomingMsg);
           final incomingMsgWithId = incomingMsg.copyWith(id: msgId);
           if (mounted) {
-            // Mark my sent messages as read (heuristic: if they replied, they read my messages)
             DBHelper().markMySentMessagesAsRead(widget.chatRoom.id);
             setState(() {
               _displayMessages.insert(0, incomingMsgWithId);
@@ -440,6 +480,12 @@ class _ChatScreenState extends State<ChatScreen> {
     if (result != null && result.isNotEmpty) {
       await DBHelper().editMessage(msg.id!, result);
       _updateMessageInList(msg.copyWith(editedText: result));
+      AppStyle.channel?.sink.add(jsonEncode({
+        "type": "EDIT",
+        "room_id": widget.chatRoom.id,
+        "msg_timestamp": msg.timestamp.toIso8601String(),
+        "new_text": result,
+      }));
     }
   }
 
@@ -468,6 +514,11 @@ class _ChatScreenState extends State<ChatScreen> {
     if (confirmed == true) {
       await DBHelper().deleteMessage(msg.id!);
       _updateMessageInList(msg.copyWith(isDeleted: true));
+      AppStyle.channel?.sink.add(jsonEncode({
+        "type": "DELETE",
+        "room_id": widget.chatRoom.id,
+        "msg_timestamp": msg.timestamp.toIso8601String(),
+      }));
     }
   }
 
@@ -562,11 +613,8 @@ class _ChatScreenState extends State<ChatScreen> {
         "negativeStreak=${r.negativeEmotionStreak.active}";
   }
 
-  String _resolveInitialRegisterMode() {
-    return AppStyle.roomRegisterModes[widget.chatRoom.id] ?? 'casual';
-  }
-
   Future<void> _handleAiFeedback() async {
+    if (_isFeedbackLoading) return;
     final draft = _controller.text.trim();
     if (draft.isEmpty) {
       setState(() {
@@ -587,9 +635,10 @@ class _ChatScreenState extends State<ChatScreen> {
         recentMessages: recentMessages,
         partnerLastMessage: partnerLastMessage,
         draft: draft,
-        registerMode: _selectedRegisterMode,
+        registerMode: AppStyle.roomRegisterModes[widget.chatRoom.id],
       );
       if (!mounted) return;
+      AppStyle.roomRegisterModes[widget.chatRoom.id] = analyzeResponse.registerMode;
       if (!analyzeResponse.shouldInvokeLlm) {
         setState(() {
           _shouldFeedback = false;
@@ -640,7 +689,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final response = await _aiFeedbackService.generateAutoReply(
         recentMessages: recentMessages,
         partnerLastMessage: partnerLastMessage,
-        registerMode: _selectedRegisterMode,
+        registerMode: AppStyle.roomRegisterModes[widget.chatRoom.id] ?? 'casual',
       );
       if (!mounted) return;
       _setDraftTextProgrammatically(response.reply);
@@ -665,12 +714,6 @@ class _ChatScreenState extends State<ChatScreen> {
       _clearFeedbackState();
       _autoReplyError = null;
     });
-  }
-
-  void _handleRegisterModeChanged(String mode) {
-    if (_selectedRegisterMode == mode) return;
-    setState(() => _selectedRegisterMode = mode);
-    AppStyle.roomRegisterModes[widget.chatRoom.id] = mode;
   }
 
   // ─── Profile ──────────────────────────────────────────────────────────────
@@ -1050,7 +1093,6 @@ class _ChatScreenState extends State<ChatScreen> {
                   onAutoReplyPressed: _handleAutoReply,
                   onApplyRewrite: _applyRewrite,
                   onCloseFeedback: _handleDismissFeedback,
-                  onRegisterModeChanged: _handleRegisterModeChanged,
                   isFeedbackLoading: _isFeedbackLoading,
                   isAutoReplyLoading: _isAutoReplyLoading,
                   feedbackError: _feedbackError,
@@ -1061,7 +1103,6 @@ class _ChatScreenState extends State<ChatScreen> {
                   feedbackRewrite: _feedbackRewrite,
                   analysisSummary: _analysisSummary,
                   debugSummary: _debugSummary,
-                  selectedRegisterMode: _selectedRegisterMode,
                   replyTo: _replyingTo,
                   onCancelReply: _cancelReply,
                 ),

@@ -233,6 +233,50 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                 print(f"Leave: {user_id} left room {room_id}")
                 continue
 
+            # Edit logic
+            if data.get("type") == "EDIT":
+                room_id = data.get("room_id")
+                msg_timestamp = data.get("msg_timestamp")
+                new_text = data.get("new_text")
+                conn = get_db()
+                cursor = conn.cursor()
+                cursor.execute("SELECT user_id FROM room_members WHERE room_id = ?", (room_id,))
+                members = [row["user_id"] for row in cursor.fetchall()]
+                conn.close()
+                edit_packet = {
+                    "type": "EDIT_EVENT",
+                    "room_id": room_id,
+                    "sender_id": user_id,
+                    "msg_timestamp": msg_timestamp,
+                    "new_text": new_text,
+                }
+                for member_id in members:
+                    if member_id != user_id and member_id in manager.active_connections:
+                        await manager.send_personal_message(edit_packet, member_id)
+                print(f"Edit: {user_id} edited msg in {room_id}")
+                continue
+
+            # Delete logic
+            if data.get("type") == "DELETE":
+                room_id = data.get("room_id")
+                msg_timestamp = data.get("msg_timestamp")
+                conn = get_db()
+                cursor = conn.cursor()
+                cursor.execute("SELECT user_id FROM room_members WHERE room_id = ?", (room_id,))
+                members = [row["user_id"] for row in cursor.fetchall()]
+                conn.close()
+                delete_packet = {
+                    "type": "DELETE_EVENT",
+                    "room_id": room_id,
+                    "sender_id": user_id,
+                    "msg_timestamp": msg_timestamp,
+                }
+                for member_id in members:
+                    if member_id != user_id and member_id in manager.active_connections:
+                        await manager.send_personal_message(delete_packet, member_id)
+                print(f"Delete: {user_id} deleted msg in {room_id}")
+                continue
+
             # Message logic
             room_id = data.get("receiver_id")
             content = data.get("content")
@@ -575,39 +619,160 @@ class AnalyzeDraftRequest(BaseModel):
 
 def _build_llm_assist_system_prompt() -> str:
     return """
-당신은 한국어 메신저 답장을 다듬는 코치입니다. 맥락을 보고 자연스럽게 판단하세요.
+당신은 한국어 메신저 답장 코치입니다.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【말투 규칙 — 2단계 기준】
+1단계(절대): [대화 모드]가 존댓말이면 전체 존댓말, 반말이면 전체 반말. 예외 없음.
+2단계(보정): [나의 말투 예시]로 어미·어휘 수준을 맞춤.
+  - 예시 어미가 "~어요/~할게요" 계열 → rewrite도 동일 어미 사용
+  - 예시 어미가 "~어/~할게" 계열 → rewrite도 동일 어미 사용
+  - 예시가 없으면 1단계(대화 모드)만 따른다.
+주의: 2단계는 1단계 범위 안에서만 적용한다.
+  존댓말 모드에서 예시 어미가 "~어요"라면, 더 격식 높은 "~겠습니다/~드리겠습니다/~예정입니다"로
+  올리지 않는다. 예시보다 격식이 높거나 낮아지지 않도록 수준을 맞춘다.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[목표]
+draft에 감정적·공격적 표현이 있으면, 그 표현은 보존하지 말고
+사용자의 "대화 목적"만 자연스럽게 다시 표현한 답장으로 새로 씁니다.
+
+[대화 목적과 감정 표현 구분]
+
+대화 목적 (= 살려야 함):
+- 사용자가 실제로 전하려는 정보, 요청, 거절, 제안, 가능 범위, 상황 설명
+- 서운함이 핵심 메시지인 경우 (감정 전달 자체가 목적): 본인의 느낌으로 허용
+- 반복 패턴이 관계에 미치는 영향에 대한 우려: 허용 (아래 [상대방 행동 언급 기준] 참고)
+
+감정 표현 (= 제거 대상):
+- 비난, 빈정거림, 단정적 거부, 항의, 상대 탓, 일방적 통보, 압박
+
+[충동적 포기 vs 실제 결론 판단]
+draft에 "됐어", "그냥 써라", "포기할게" 같은 포기 표현이 있을 때:
+- 판단 기준: 대화 전체 맥락에서 사용자가 실제로 원하는 것이 무엇인가?
+- 대화 내내 무언가를 얻거나 개선을 원했는데 마지막에만 포기 선언 → 감정 표현으로 보고, 실제 목적을 살린다.
+- 대화 흐름상 종료·취소·거절이 명백한 의사결정으로 보일 때 → 핵심 결론으로 보고 그 방향을 유지한다.
+핵심: "결론 유지" 규칙은 실제 의사결정에만 적용한다. 감정에서 나온 충동적 포기는 의사결정이 아니다.
+
+[상대방 행동 언급 기준]
+아래 두 가지를 반드시 구분한다.
+
+① 지금 하는 행동에 대한 요구·불평 → rewrite에서 완전히 제거
+   "~하지 마세요", "왜 자꾸 ~해요", "그만 ~해요" 패턴이 draft에 있으면,
+   상대 행동에 대한 언급을 rewrite에서 일절 하지 않는다.
+   softened 표현("~하셔서 부담스러운데", "~하시니까 좀 그렇지만")도 동일하게 금지.
+   → 사용자의 현재 상황·계획·답변만 전달한다.
+
+② 반복 패턴이 관계에 미치는 영향에 대한 우려 → rewrite에서 유지
+   "항상", "맨날", "매번" 같은 단어로 반복성을 지적하면서,
+   그로 인해 협력·관계가 어려워진다는 우려를 표현한 경우.
+   이는 즉각적인 행동 요구가 아니라 관계에 대한 우려이므로 살린다.
+   단, "무책임하다", "믿을 수 없다" 같은 단정적 비난은 제거하고
+   "이런 상황이 반복되면 함께 하기 어려울 것 같다"는 형태로 표현한다.
+
+구분 기준 한 줄: "지금 당장 멈추라는 요구인가" vs "이 패턴이 관계에 어떤 영향을 주는지에 대한 우려인가"
+
+[rewrite 작성 규칙]
+1. 말투는 [말투 규칙 2단계]에 따라 결정한다.
+   [나의 말투 예시]의 어미·어휘 수준과 자연스럽게 어울려야 한다.
+   공문서·관료적 문체는 피한다: "~하심을 이해합니다만", "~드리기 어려운 점", "~에 대해 말씀드립니다" 등.
+
+2. 사용자의 "핵심 결론·입장"은 절대 뒤집지 마세요.
+   거절은 거절로, 취소는 취소로, 상대가 와야 한다면 그 입장으로 유지.
+   톤·표현만 바꾸고 결론은 그대로 유지합니다.
+
+3. 단정적·통보형 톤은 제안형·문의형으로 풀어주세요. 결론은 유지하되 표현만 부드럽게.
+
+4. rewrite 구성: 짧은 도입부(상황 인정 또는 본인 상황 설명) + 핵심 목적.
+   한두 문장이면 충분합니다. 길게 늘리지 마세요.
+
+5. 상대가 서운함·지적을 표현한 직후라면, 그 원인을 도입부에서 짧게 인정하세요.
+   단, 사용자가 전혀 인정할 의도가 없어 보이면 생략.
+   ※ 사용자가 말하지 않은 새 사과·약속·감정은 만들지 마세요.
+
+6. 상대가 거절·원칙 통보 후 사용자가 다시 부탁하는 경우:
+   이미 알려진 정보 재확인 요청은 금지. 본인 사정 짧게 → 동일 요청에 대한 예외 가능 여부를 문의형으로.
+
+   ⚠️ 새로운 대안 발명 금지: 원래 요청이 A라면 → A에 대한 예외를 묻는 것만 허용.
+   A와 다른 주제 B를 발명해서 제안하는 것은 금지.
+   "연관되어 있다"는 이유로 다른 주제를 끌어와도 안 된다.
+
+   ⚠️ 이미 "다른 방법이 없냐"고 묻고 거절된 경우:
+   더 이상 새로운 방법·대안을 찾으려 하지 말 것.
+   이 상황의 rewrite는 "개인 사정만이라도 한 번 더 고려해달라는 최종 부탁"이다.
+   형태: "사정이 있어서 어렵게 부탁드리는 건데, 혹시 한 번 더 고려해주실 수 있을지요."
+
+7. 격식 관계에서 부탁할 때: 책임 회피 표현 대신 명확한 인정.
+
+8. 너무 비굴하거나 과한 사과로 만들지 마세요.
+
+9. draft에 요청·바람이 있었다면 rewrite에도 구체적 요청을 담으세요.
+   서운함·속상함 표현만으로 끝내지 마세요.
 
 [원칙]
-1. 사용자의 핵심 의도(말하려는 내용·대화 목적)는 유지하되, 공격성·욕설·무시 표현만 부드럽게 바꿉니다.
-2. 사용자가 말하지 않은 사실·감정·약속·사과·질문을 새로 만들지 마세요. ("미안", "괜찮아?" 같은 표현 임의 추가 금지)
-3. 이미 자연스럽고 무례하지 않으면 다듬지 마세요. 짧은 단답("그냥", "응", "ㅇㅇ")도 맥락에 맞으면 그대로.
-4. 격식 모드면 존댓말, 반말 모드면 반말.
+1. 비난·빈정거림·압박·상대 탓이 있으면 shouldFeedback=true.
+2. 사용자가 말하지 않은 사과·약속·사실을 새로 만들지 마세요.
+3. 차분한 거절·자연스러운 단답·정상적 정보 전달은 그대로 (shouldFeedback=false).
 
-[피드백 필요 여부]
-- 욕설, 공격적 표현, 비꼼, 상대 감정 무시, 격식 어긋남 → shouldFeedback=true
-- 차분한 거절·짧은 단답·정상적 정보 전달 → shouldFeedback=false
+[판단 절차]
+1) [대화 모드] + [나의 말투 예시] 확인 → rewrite 어미·어휘 수준 결정.
+2) 상대 마지막 발화의 성격 파악.
+3) draft에서 사용자의 진짜 목적·결론을 파악.
+   포기 표현이 있으면 [충동적 포기 vs 실제 결론 판단] 기준으로 먼저 분류.
+4) 상대 행동 언급이 있으면 [상대방 행동 언급 기준]으로 ①/② 분류.
+5) 감정 표현이 있으면 shouldFeedback=true.
+6) 도입부 + 핵심 목적 구조로 재구성.
 
-[rewrite 시 주의]
-거절·선 긋기 의도는 "말하고 싶지 않다 / 개인적인 일이다"처럼 boundary는 살리고 공격성만 빼세요.
-"관심 없다 / 궁금하지 않다"처럼 의미를 뒤집지 마세요 — 핵심은 "공유하지 않겠다"이지 "흥미 없다"가 아닙니다.
+[자주 발생하는 함정]
+A. 이미 통보된 정보를 "다시 확인해 달라"고 하지 마세요. → 예외·대안 문의로.
+B. 과거 합의·사전 통보 재언급 완전 금지.
+   "어제 ~로 하기로 했는데", "미리 말씀드렸는데" 같은 표현은 반박처럼 들리므로 포함하지 마세요.
+   → 현재 시간·일정이 어렵다는 사실만 간결하게.
+C. 결론 자체를 뒤집지 마세요 (취소→유지, 거절→수락, 상대가 와야 함→본인이 감 등).
+   ⚠️ 특히: 상대방이 와야 하거나 상대방이 특정 행동을 해야 한다는 것이 핵심 결론이면,
+   rewrite에서 상대에게 그 행동을 명시적으로 요청하는 문장이 포함되어야 한다.
+   "나는 여기 있을게", "나는 기다릴게"처럼 사용자 행동만 서술하고 끝내면 안 된다.
+   반드시 "네가 올 수 있어?", "이쪽으로 와줄 수 있어?" 처럼 상대에게 직접 요청하는 문장을 포함할 것.
+D. 책임 회피 표현 금지 → 명확한 인정으로.
+E. [충동적 포기 vs 실제 결론 판단] 기준을 적용했는지 확인하세요.
+F. rewrite 작성 후 B·C·E를 다시 확인하고, 해당하면 재작성하세요.
 
-shouldFeedback=true 일 때 rewrite는 반드시 제공.
+[특수 상황 패턴]
 
-JSON으로만 답하세요:
+▶ 즉각적 행동 요구가 있는 draft
+  draft의 핵심이 상대방에게 지금 하는 행동을 멈추라는 요구일 때:
+  상대 행동을 언급하지 말고(softened 표현도 금지) 사용자의 상황·답변·계획만 전달한다.
+
+▶ 반복 패턴 우려가 있는 draft
+  draft에 "항상", "맨날", "매번" 등이 있고 협력·관계에 대한 우려를 담고 있을 때:
+  단정적 비난 표현은 제거하되, 반복될 경우 함께하기 어렵다는 우려 자체는 반드시 살린다.
+  우려를 "아쉽다"·"궁금하다" 수준으로 희석하지 마세요.
+
+▶ 거절 반복 압박 패턴
+  사용자가 이미 거절했는데 상대방이 계속 요청·압박하는 경우:
+  부드럽지만 명확한 거절을 유지한다. 질문형·협상형으로 바꾸지 말 것.
+  "다른 방법이 있는지 여쭤봐도 될까요?" 같은 표현은 거절이 협상으로 변질되므로 금지.
+
+▶ 격식 관계 + 거절 직후 패턴
+  상대가 원칙·거절을 통보한 직후 사용자가 다시 말을 거는 경우:
+  ① 본인 사정 짧게 + 본인 책임 명확히 인정
+  ② 예외·대안 가능 여부를 직접 문의형으로
+
+[출력 형식]
+JSON만:
 {
   "shouldFeedback": boolean,
-  "feedback": "왜 다듬는 게 좋은지 짧게, 없으면 null",
+  "feedback": "왜 다듬는 게 좋은지 한 줄, 없으면 null",
   "rewrite": "그대로 보낼 수 있는 문장, 없으면 null",
-  "reason": "판단 근거 한 줄, 없으면 null"
+  "reason": "어떤 감정 표현을 빼고 어떤 목적을 살렸는지 한 줄, 없으면 null"
 }
 """.strip()
 
 
 def _build_llm_assist_user_prompt(payload: LlmAssistRequest) -> str:
-    candidate = payload.llmCandidatePayload or {}
+    candidate = payload.llmCandidatePayload if isinstance(payload.llmCandidatePayload, dict) else {}
 
-    # 최근 대화 맥락 (최근 6개로 제한)
-    recent_messages = candidate.get("recentMessages") if isinstance(candidate, dict) else None
+    recent_messages = candidate.get("recentMessages")
     if not isinstance(recent_messages, list):
         recent_messages = [
             {"role": m.role, "text": m.text}
@@ -623,11 +788,23 @@ def _build_llm_assist_user_prompt(payload: LlmAssistRequest) -> str:
         context_lines.append(f"[{speaker}] {m.get('text', '')}")
     context_text = "\n".join(context_lines) if context_lines else "(대화 내역 없음)"
 
-    register_mode = candidate.get("registerMode") if isinstance(candidate, dict) else None
-    register_mode = _normalize_register_mode(register_mode)
+    register_mode = _normalize_register_mode(candidate.get("registerMode"))
     mode_hint = "존댓말(격식체)" if register_mode == "formal" else "반말(캐주얼)"
 
+    # 사용자 발화만 뽑아 말투 예시 제공
+    my_lines = [
+        m.get("text", "") for m in recent_messages
+        if isinstance(m, dict) and m.get("role") == "me" and m.get("text", "").strip()
+    ]
+    my_style_hint = " / ".join(my_lines[-3:]) if my_lines else "(없음)"
+
     return f"""
+[대화 모드]
+{mode_hint}
+
+[나의 말투 예시 — rewrite는 이 말투를 그대로 따를 것]
+{my_style_hint}
+
 [최근 대화]
 {context_text}
 
@@ -636,9 +813,6 @@ def _build_llm_assist_user_prompt(payload: LlmAssistRequest) -> str:
 
 [사용자가 작성한 draft]
 {payload.draft}
-
-[대화 모드]
-{mode_hint}
 
 위 정보를 보고 시스템 지시에 따라 JSON으로만 답하세요.
 """.strip()
@@ -1000,6 +1174,72 @@ def _normalize_register_mode(register_mode: Optional[str]) -> str:
     return "formal" if register_mode == "formal" else "casual"
 
 
+def _infer_register_mode(recent_messages: list, partner_last_message: str) -> str:
+    """대화 맥락을 보고 사용자가 써야 할 말투 모드를 GPT로 추론한다."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return "casual"
+
+    context_lines = []
+    for m in recent_messages[-6:]:
+        if isinstance(m, dict):
+            speaker = "상대방" if m.get("role") == "partner" else "나"
+            text = m.get("text", "")
+        else:
+            speaker = "상대방" if m.role == "partner" else "나"
+            text = m.text
+        context_lines.append(f"[{speaker}] {text}")
+    if partner_last_message:
+        context_lines.append(f"[상대방] {partner_last_message}")
+    context_text = "\n".join(context_lines) if context_lines else "(대화 내역 없음)"
+
+    system_prompt = """대화를 보고 사용자("나")가 상대방에게 어떤 말투를 써야 하는 관계인지 판단하세요.
+
+- "formal": 존댓말을 써야 하는 관계 (상사, 교수, 선배, 고객, 처음 보는 사람, 부모님·가족 어른 등)
+- "casual": 반말을 써도 되는 관계 (친구, 동생, 연인, 편한 동료 등)
+
+판단 기준 (우선순위 순):
+1. "나"의 발화 어미를 최우선으로 봅니다.
+   - 나: "~요/~습니다/~어요/아뇨" → formal
+   - 나: "~야/~어/~지/ㅋ/ㅎ" → casual
+2. 나의 발화가 없으면 상대방 호칭과 말투로 추론합니다.
+3. 상대방이 반말을 해도 나는 존댓말을 써야 하는 경우가 있습니다.
+   부모님·가족 어른은 자녀에게 반말/임말을 써도, 자녀는 존댓말을 쓰는 것이 일반적입니다.
+
+JSON만 반환: {"registerMode": "formal" | "casual"}"""
+
+    model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    request_body = {
+        "model": model_name,
+        "response_format": {"type": "json_object"},
+        "temperature": 0.1,
+        "max_tokens": 20,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": context_text},
+        ],
+    }
+
+    try:
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=json.dumps(request_body).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10, context=SSL_CONTEXT) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            content = data["choices"][0]["message"]["content"]
+            parsed = json.loads(content)
+            mode = parsed.get("registerMode", "casual")
+            return mode if mode in ("formal", "casual") else "casual"
+    except Exception:
+        return "casual"
+
+
 def _estimate_formal_prob(text: str) -> float:
     stripped = text.strip()
     if not stripped:
@@ -1320,48 +1560,69 @@ def _build_llm_candidate_payload(
 
 def _build_auto_reply_system_prompt() -> str:
     return """
-당신은 사용자의 카카오톡 답장 초안을 작성하는 도우미입니다.
-최근 대화 맥락과 상대방의 마지막 발화를 보고, 사용자 입장에서 자연스럽고 짧은 답장 초안 하나를 생성합니다.
+당신은 사용자 대신 카카오톡 답장을 짧게 작성하는 도우미입니다.
 
-원칙:
-- 상대방의 마지막 메시지에 직접 반응해야 합니다.
-- 실제 메신저에서 바로 보낼 수 있는 한국어 문장으로 작성합니다.
-- 질문이면 답하거나 자연스럽게 보류합니다.
-- 요청이나 부탁이면 수락, 보류, 거절 중 맥락상 자연스러운 방향으로 답합니다.
-- 감정 표현이면 짧은 공감이나 반응을 우선합니다.
-- JSON 외 다른 텍스트는 출력하지 않습니다.
+[가장 중요한 원칙]
+상대방이 원하는 것을 무조건 수락하는 답장을 만들지 마세요.
+사용자가 이전 대화에서 어떤 상황에 처해 있는지, 무엇이 필요한지를 파악해서 생성합니다.
 
-응답 JSON 형식:
-{
-  "reply": "생성된 답장 초안",
-  "reason": "짧은 생성 이유"
-}
+예:
+- 사용자가 마감을 놓쳐서 예외 처리를 부탁해야 하는 상황 → 수락이 아니라 예외 요청 답장
+- 사용자가 오늘 처리하기 어렵다고 했는데 상대가 오늘까지 해달라고 함 → 어렵다고 설명하고 대안 제시
+- 사용자가 거절했는데 상대가 계속 부탁함 → 거절 입장 유지
+
+[원칙]
+1. 관계와 말투에 맞게 작성하세요.
+   - 친구·연인·편한 사이 → 자연스러운 반말
+   - 부모님·가족 → 가족체 (~해요/~할게요 수준의 편한 존댓말)
+   - 교수님·상사·고객·격식 → 공손한 존댓말
+
+2. 사용자가 처한 상황을 파악해서 그에 맞는 방향으로 생성합니다.
+   - 부탁해야 하는 상황 → 정중하게 부탁
+   - 거절해야 하는 상황 → 상황 설명 + 대안 제시
+   - 상대 서운함/지적 → 상황 설명 (과도한 사과·반성 금지)
+   - 상대가 거절·원칙 통보를 했더라도, 사용자에게 특수한 사정이 있다면 예외·대안을 한 번 더 정중하게 부탁하는 방향으로 생성합니다.
+
+3. 사용자가 말하지 않은 사과·약속·감사를 추가하지 마세요.
+
+4. 한두 문장으로 짧게 작성합니다.
+
+5. 실제 카카오톡에서 바로 보낼 수 있는 자연스러운 구어체로 작성합니다.
+
+[출력 형식]
+JSON만:
+{"reply": "답장 문장", "reason": "짧은 이유"}
 """.strip()
 
 
 def _build_auto_reply_user_prompt(payload: AutoReplyRequest) -> str:
     context_lines = []
     for message in payload.recentMessages:
-      speaker = "상대방" if message.role == "partner" else "나"
-      context_lines.append(f"[{speaker}] {message.text}")
+        speaker = "상대방" if message.role == "partner" else "나"
+        context_lines.append(f"[{speaker}] {message.text}")
     context_text = "\n".join(context_lines) if context_lines else "(대화 내역 없음)"
-    register_mode = _normalize_register_mode(payload.registerMode)
-    tone_guide = "존댓말과 격식체를 유지하세요." if register_mode == "formal" else "자연스럽고 편한 말투를 사용하세요."
+
+    if payload.registerMode:
+        register_mode = _normalize_register_mode(payload.registerMode)
+    else:
+        register_mode = _infer_register_mode(payload.recentMessages, payload.partnerLastMessage)
+
+    if register_mode == "formal":
+        tone_guide = "교수님·상사·고객 등 격식 관계입니다. 공손한 존댓말로 작성하세요."
+    else:
+        tone_guide = "친구·연인·가족 등 편한 관계입니다. 자연스러운 반말 또는 가족체로 작성하세요."
 
     return f"""
+[대화 모드]
+{tone_guide}
+
 [최근 대화 맥락]
 {context_text}
 
 [상대방 마지막 메시지]
 {payload.partnerLastMessage}
 
-[대화 모드]
-{register_mode}
-
-말투 가이드:
-{tone_guide}
-
-위 맥락을 바탕으로 사용자 입장에서 자연스러운 답장 초안 하나를 JSON 형식으로만 반환해주세요.
+위 맥락을 바탕으로 사용자 입장에서 자연스러운 답장 초안을 JSON 형식으로만 반환해주세요.
 """.strip()
 
 
@@ -1480,7 +1741,10 @@ def _call_openai_auto_reply(payload: AutoReplyRequest) -> dict:
 def _analyze_draft_rule_based(payload: AnalyzeDraftRequest) -> dict:
     draft = payload.draft.strip()
     partner_last = payload.partnerLastMessage.strip()
-    register_mode = _normalize_register_mode(payload.registerMode)
+    if payload.registerMode:
+        register_mode = _normalize_register_mode(payload.registerMode)
+    else:
+        register_mode = _infer_register_mode(payload.recentMessages, partner_last)
     formal_prob = _estimate_formal_prob(draft)
     partner_speech = _get_speech_act(partner_last)
     draft_speech = _get_speech_act(draft)

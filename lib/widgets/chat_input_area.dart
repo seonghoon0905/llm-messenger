@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/app_style.dart';
 import '../models/message.dart';
+
+const _kAutoFeedbackPrefKey = 'autoFeedbackEnabled';
 
 class ChatInputArea extends StatefulWidget {
   final TextEditingController controller;
@@ -11,7 +15,6 @@ class ChatInputArea extends StatefulWidget {
   final VoidCallback? onAutoReplyPressed;
   final VoidCallback? onApplyRewrite;
   final VoidCallback? onCloseFeedback;
-  final ValueChanged<String>? onRegisterModeChanged;
   final bool isFeedbackLoading;
   final bool isAutoReplyLoading;
   final String? feedbackError;
@@ -22,7 +25,6 @@ class ChatInputArea extends StatefulWidget {
   final String? feedbackRewrite;
   final String? analysisSummary;
   final String? debugSummary;
-  final String selectedRegisterMode;
   final Message? replyTo;
   final VoidCallback? onCancelReply;
 
@@ -34,7 +36,6 @@ class ChatInputArea extends StatefulWidget {
     this.onAutoReplyPressed,
     this.onApplyRewrite,
     this.onCloseFeedback,
-    this.onRegisterModeChanged,
     this.isFeedbackLoading = false,
     this.isAutoReplyLoading = false,
     this.feedbackError,
@@ -45,7 +46,6 @@ class ChatInputArea extends StatefulWidget {
     this.feedbackRewrite,
     this.analysisSummary,
     this.debugSummary,
-    this.selectedRegisterMode = 'casual',
     this.replyTo,
     this.onCancelReply,
   });
@@ -58,6 +58,8 @@ class _ChatInputAreaState extends State<ChatInputArea> {
   bool _isAiPanelOpen = false;
   bool _isDebugExpanded = false;
   late final FocusNode _focusNode;
+  Timer? _feedbackTimer;
+  bool _suppressNextFeedback = false;
 
   @override
   void initState() {
@@ -67,8 +69,6 @@ class _ChatInputAreaState extends State<ChatInputArea> {
         if (event is KeyDownEvent &&
             event.logicalKey == LogicalKeyboardKey.enter &&
             !HardwareKeyboard.instance.isShiftPressed) {
-          // 한글 IME 조합 중이면 Enter를 가로채지 않음
-          // (가로채면 자음·모음 분리 버그 발생)
           if (widget.controller.value.composing.isValid) {
             return KeyEventResult.ignored;
           }
@@ -78,10 +78,57 @@ class _ChatInputAreaState extends State<ChatInputArea> {
         return KeyEventResult.ignored;
       },
     );
+    _loadAutoFeedbackPref();
+    widget.controller.addListener(_onControllerChanged);
+  }
+
+  Future<void> _loadAutoFeedbackPref() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        AppStyle.autoFeedbackEnabled =
+            prefs.getBool(_kAutoFeedbackPrefKey) ?? true;
+      });
+    }
+  }
+
+  void _onControllerChanged() {
+    if (!AppStyle.autoFeedbackEnabled) return;
+    final text = widget.controller.text.trim();
+    _feedbackTimer?.cancel();
+    if (text.isEmpty) return;
+    if (_suppressNextFeedback) {
+      _suppressNextFeedback = false;
+      return;
+    }
+    _feedbackTimer = Timer(const Duration(seconds: 2), () {
+      widget.onFeedbackPressed?.call();
+    });
+  }
+
+  Future<void> _toggleAutoFeedback(bool value) async {
+    setState(() => AppStyle.autoFeedbackEnabled = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kAutoFeedbackPrefKey, value);
+    if (!value) _feedbackTimer?.cancel();
+  }
+
+  @override
+  void didUpdateWidget(ChatInputArea oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 자동응답 완료 시점: 이미 시작된 타이머까지 취소
+    // (텍스트 채움 → 타이머 시작 → 다음 프레임에 이 코드 실행 순서이므로
+    //  cancel을 여기서 해야 실제로 막힘)
+    if (oldWidget.isAutoReplyLoading && !widget.isAutoReplyLoading) {
+      _feedbackTimer?.cancel();
+      _suppressNextFeedback = true;
+    }
   }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
+    _feedbackTimer?.cancel();
     _focusNode.dispose();
     super.dispose();
   }
@@ -118,9 +165,7 @@ class _ChatInputAreaState extends State<ChatInputArea> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Reply preview strip
             if (widget.replyTo != null) _buildReplyPreview(),
-            // Feedback surface
             if (_shouldShowFeedbackSurface())
               Container(
                 width: double.infinity,
@@ -139,12 +184,6 @@ class _ChatInputAreaState extends State<ChatInputArea> {
                   ),
                 ),
               ),
-            // Register mode selector
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-              child: _buildRegisterModeSelector(),
-            ),
-            // Input row
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               child: Row(
@@ -153,21 +192,41 @@ class _ChatInputAreaState extends State<ChatInputArea> {
                   GestureDetector(
                     onTap: () =>
                         setState(() => _isAiPanelOpen = !_isAiPanelOpen),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: _isAiPanelOpen
-                            ? AppStyle.primary
-                            : AppStyle.primaryLight,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        Icons.auto_awesome_rounded,
-                        color: _isAiPanelOpen ? Colors.white : AppStyle.primary,
-                        size: 18,
-                      ),
+                    child: Stack(
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: _isAiPanelOpen
+                                ? AppStyle.primary
+                                : AppStyle.primaryLight,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            Icons.auto_awesome_rounded,
+                            color: _isAiPanelOpen
+                                ? Colors.white
+                                : AppStyle.primary,
+                            size: 18,
+                          ),
+                        ),
+                        // 자동 피드백 ON 상태 표시 점
+                        if (AppStyle.autoFeedbackEnabled && !_isAiPanelOpen)
+                          Positioned(
+                            right: 3,
+                            top: 3,
+                            child: Container(
+                              width: 7,
+                              height: 7,
+                              decoration: const BoxDecoration(
+                                color: AppStyle.online,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -231,11 +290,7 @@ class _ChatInputAreaState extends State<ChatInputArea> {
                         child: SingleChildScrollView(
                           child: Column(
                             children: [
-                              _buildAiButton(
-                                label: "대화 피드백 받기",
-                                icon: Icons.auto_awesome_motion_rounded,
-                                onTap: widget.onFeedbackPressed ?? () {},
-                              ),
+                              _buildAutoFeedbackToggle(),
                               const SizedBox(height: 8),
                               _buildAiButton(
                                 label: "자동 응답 생성",
@@ -251,6 +306,51 @@ class _ChatInputAreaState extends State<ChatInputArea> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildAutoFeedbackToggle() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+      decoration: BoxDecoration(
+        color: AppStyle.primaryLight,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppStyle.primary.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.auto_awesome_motion_rounded,
+            size: 17,
+            color: AppStyle.autoFeedbackEnabled
+                ? AppStyle.primary
+                : AppStyle.textTertiary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'AI 자동 피드백',
+              style: TextStyle(
+                color: AppStyle.autoFeedbackEnabled
+                    ? AppStyle.primary
+                    : AppStyle.textSecondary,
+                fontWeight: FontWeight.w700,
+                fontSize: 13.5,
+              ),
+            ),
+          ),
+          Transform.scale(
+            scale: 0.8,
+            child: Switch(
+              value: AppStyle.autoFeedbackEnabled,
+              onChanged: _toggleAutoFeedback,
+              activeThumbColor: Colors.white,
+              activeTrackColor: AppStyle.primary,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -311,57 +411,6 @@ class _ChatInputAreaState extends State<ChatInputArea> {
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildRegisterModeSelector() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: AppStyle.surfaceVariant,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Expanded(child: _buildModeChip('편한 대화', 'casual')),
-          const SizedBox(width: 4),
-          Expanded(child: _buildModeChip('격식 대화', 'formal')),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildModeChip(String label, String mode) {
-    final selected = widget.selectedRegisterMode == mode;
-    return GestureDetector(
-      onTap: () => widget.onRegisterModeChanged?.call(mode),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(vertical: 7),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected ? AppStyle.primary : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: AppStyle.primary.withValues(alpha: 0.3),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
-                  )
-                ]
-              : null,
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: selected ? Colors.white : AppStyle.primary,
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
       ),
     );
   }
@@ -591,7 +640,6 @@ class _ChatInputAreaState extends State<ChatInputArea> {
       color = AppStyle.online;
     } else if (debug.contains('nluSource=fallback') ||
         debug.contains('partnerEmotionSource=fallback')) {
-      // nluSource=fallback → rule-based 분석 수행됨 (분석 자체는 작동 중)
       label = 'NLU: fallback';
       color = Colors.orange;
     }

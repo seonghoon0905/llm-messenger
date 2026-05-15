@@ -137,6 +137,19 @@ class _MainScreenState extends State<MainScreen> {
               SnackBar(content: Text("${friend.name}님이 친구 목록에 추가되었습니다.")),
             );
           }
+        } else if (data['type'] == 'EDIT_EVENT') {
+          final roomId = data['room_id'] as String? ?? '';
+          final msgTimestamp = data['msg_timestamp'] as String? ?? '';
+          final newText = data['new_text'] as String? ?? '';
+          if (roomId.isNotEmpty && msgTimestamp.isNotEmpty) {
+            await DBHelper().editMessageByTimestamp(roomId, msgTimestamp, newText);
+          }
+        } else if (data['type'] == 'DELETE_EVENT') {
+          final roomId = data['room_id'] as String? ?? '';
+          final msgTimestamp = data['msg_timestamp'] as String? ?? '';
+          if (roomId.isNotEmpty && msgTimestamp.isNotEmpty) {
+            await DBHelper().deleteMessageByTimestamp(roomId, msgTimestamp);
+          }
         } else if (data['type'] == 'MEMBER_JOINED') {
           final roomId = data['room_id'] as String? ?? '';
           final userId = data['user_id'] as String? ?? '';
@@ -146,12 +159,15 @@ class _MainScreenState extends State<MainScreen> {
             if (room != null && !room.memberIds.contains(userId)) {
               await DBHelper().updateRoomMembers(roomId, [...room.memberIds, userId]);
             }
-            final sysMsg = Message(
-              text: '$nickname님이 입장하셨습니다.',
-              sender: '__system__',
-              timestamp: DateTime.tryParse(data['timestamp'] ?? '') ?? DateTime.now(),
-            );
-            await DBHelper().insertMessage(roomId, sysMsg);
+            // 채팅방이 열려 있으면 chat_screen.dart가 처리하므로 중복 삽입 방지
+            if (AppStyle.currentOpenRoomId != roomId) {
+              final sysMsg = Message(
+                text: '$nickname님이 입장하셨습니다.',
+                sender: '__system__',
+                timestamp: DateTime.tryParse(data['timestamp'] ?? '') ?? DateTime.now(),
+              );
+              await DBHelper().insertMessage(roomId, sysMsg);
+            }
             _loadChatRooms();
           }
         } else if (data['content'] != null && data['room_id'] != null) {
@@ -167,12 +183,15 @@ class _MainScreenState extends State<MainScreen> {
             timestamp: timestamp,
             incrementUnread: shouldIncrementUnread,
           );
-          final incomingMsg = Message(
-            text: data['content'] ?? "",
-            sender: data['sender_nickname'] ?? data['sender_id'] ?? "unknown",
-            timestamp: timestamp,
-          );
-          await DBHelper().insertMessage(roomId, incomingMsg);
+          // 채팅방이 열려 있으면 chat_screen.dart가 이미 메시지를 삽입하므로 중복 방지
+          if (AppStyle.currentOpenRoomId != roomId) {
+            final incomingMsg = Message(
+              text: data['content'] ?? "",
+              sender: data['sender_nickname'] ?? data['sender_id'] ?? "unknown",
+              timestamp: timestamp,
+            );
+            await DBHelper().insertMessage(roomId, incomingMsg);
+          }
           _loadChatRooms();
         }
       });
@@ -195,42 +214,6 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
-  void _createNewChat(String title, String relation, List<String> inviteeIds) async {
-    final myId = AppStyle.myLoggedInId ?? 'me';
-    final roomId = DateTime.now().millisecondsSinceEpoch.toString();
-    final memberIds = [myId, ...inviteeIds];
-    final newRoom = ChatRoom(
-      id: roomId,
-      title: title,
-      relation: relation,
-      lastMessageTime: DateTime.now(),
-      memberIds: memberIds,
-    );
-    try {
-      await DBHelper().insertChatRoom(newRoom);
-      // 선택한 친구들에게 INVITE 전송
-      for (final inviteeId in inviteeIds) {
-        final invitePacket = {
-          "type": "INVITE",
-          "room_id": roomId,
-          "invitee_id": inviteeId,
-          "room_title": title,
-          "relation": relation,
-          "timestamp": DateTime.now().toIso8601String(),
-        };
-        AppStyle.channel?.sink.add(jsonEncode(invitePacket));
-      }
-      await _loadChatRooms();
-    } catch (e) {
-      debugPrint("방 생성 실패: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('데이터베이스 오류로 방을 생성할 수 없습니다.')),
-        );
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final List<Widget> pages = [
@@ -246,26 +229,6 @@ class _MainScreenState extends State<MainScreen> {
     return Scaffold(
       backgroundColor: AppStyle.backgroundGrey,
       body: pages[_selectedIndex],
-      floatingActionButton: _selectedIndex == 1
-          ? FloatingActionButton(
-              onPressed: () async {
-                final friends = await DBHelper().getFriends();
-                if (!context.mounted) return;
-                ChatDialogs.showCreateChatDialog(
-                  context: context,
-                  friends: friends,
-                  onCreate: (title, relation, inviteeIds) =>
-                      _createNewChat(title, relation, inviteeIds),
-                );
-              },
-              backgroundColor: AppStyle.primary,
-              elevation: 4,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Icon(Icons.edit_rounded, color: Colors.white, size: 22),
-            )
-          : null,
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
           border: Border(top: BorderSide(color: AppStyle.divider, width: 0.5)),

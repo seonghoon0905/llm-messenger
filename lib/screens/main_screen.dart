@@ -40,6 +40,7 @@ class _MainScreenState extends State<MainScreen> {
   Future<void> _syncInitialData() async {
     await _syncRoomsFromServer();
     await _syncFriendsFromServer();
+    await _syncMissedMessages();
     await _loadChatRooms();
   }
 
@@ -66,6 +67,59 @@ class _MainScreenState extends State<MainScreen> {
       }
     } catch (e) {
       debugPrint("서버 동기화 실패: $e");
+    }
+  }
+
+  Future<void> _syncMissedMessages() async {
+    if (AppStyle.myLoggedInId == null) return;
+    final myId = AppStyle.myLoggedInId!;
+    final rooms = await DBHelper().getChatRooms();
+    for (final room in rooms) {
+      try {
+        // 로컬 DB에서 가장 최근 메시지 타임스탬프 조회
+        final localMessages = await DBHelper().getMessages(room.id);
+        String? since;
+        if (localMessages.isNotEmpty) {
+          final latest = localMessages
+              .map((m) => m.timestamp)
+              .reduce((a, b) => a.isAfter(b) ? a : b);
+          since = latest.toIso8601String();
+        }
+
+        final uri = since != null
+            ? Uri.parse(
+                "${AppStyle.baseUrl}/rooms/${room.id}/messages?since=${Uri.encodeComponent(since)}")
+            : Uri.parse("${AppStyle.baseUrl}/rooms/${room.id}/messages");
+
+        final response = await http.get(uri);
+        if (response.statusCode != 200) continue;
+
+        final data = jsonDecode(response.body);
+        final serverMsgs = data['messages'] as List<dynamic>? ?? [];
+
+        for (final raw in serverMsgs) {
+          final senderId = raw['sender_id'] as String? ?? '';
+          if (senderId == myId) continue; // 내가 보낸 메시지는 이미 로컬에 있음
+
+          final msg = Message(
+            text: raw['content'] as String? ?? '',
+            sender: raw['sender_nickname'] as String? ?? senderId,
+            timestamp: DateTime.tryParse(raw['timestamp'] as String? ?? '') ??
+                DateTime.now(),
+            isRead: false,
+          );
+          await DBHelper().insertMessage(room.id, msg);
+          await DBHelper().upsertIncomingChatRoom(
+            roomId: room.id,
+            title: room.title,
+            relation: room.relation,
+            timestamp: msg.timestamp,
+            incrementUnread: true,
+          );
+        }
+      } catch (e) {
+        debugPrint("누락 메시지 동기화 실패 (${room.id}): $e");
+      }
     }
   }
 
@@ -264,11 +318,14 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  void _handleLogout() {
+  Future<void> _handleLogout() async {
     AppStyle.disconnectSocket();
     AppStyle.globalStream = null;
     AppStyle.myLoggedInId = null;
     AppStyle.myProfile = null;
+    AppStyle.roomRegisterModes.clear();
+    await DBHelper.closeAndReset();
+    if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (context) => const LoginScreen()),

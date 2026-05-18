@@ -283,8 +283,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         ? AppStyle.primary
         : AppStyle.getAvatarColor(title);
     final initial = icon != null ? null : AppStyle.getInitial(title);
-    final isCached = _scoreCache.containsKey(
-        value == _allKey ? _allKey : value);
 
     return PopupMenuItem<String>(
       value: value,
@@ -330,9 +328,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
               ],
             ),
           ),
-          if (isCached)
-            const Icon(Icons.check_circle_rounded,
-                size: 14, color: AppStyle.online),
         ],
       ),
     );

@@ -99,14 +99,16 @@ class _SettingsTabState extends State<SettingsTab> {
       // Backend error — proceed with local cleanup anyway
     }
 
-    // 2. Clear local DB
+    // 2. Clear local DB and close connection
     await DBHelper().clearAllData();
+    await DBHelper.closeAndReset();
 
     // 3. Disconnect socket and clear session
     AppStyle.disconnectSocket();
     AppStyle.globalStream = null;
     AppStyle.myLoggedInId = null;
     AppStyle.myProfile = null;
+    AppStyle.roomRegisterModes.clear();
 
     if (mounted) {
       Navigator.pop(context); // close loading dialog
@@ -177,7 +179,7 @@ class _SettingsTabState extends State<SettingsTab> {
                     iconColor: const Color(0xFF7C3AED),
                     iconBg: const Color(0xFFF5F3FF),
                     label: 'AI 엔진',
-                    value: 'GPT-4o mini',
+                    value: 'GPT-4.1',
                   ),
                 ],
               ),

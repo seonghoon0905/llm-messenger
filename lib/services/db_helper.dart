@@ -18,6 +18,13 @@ class DBHelper {
     return _database!;
   }
 
+  /// 로그아웃 시 호출 — DB 연결을 닫고 캐시를 초기화한다.
+  /// 다음 로그인 시 새 계정의 DB 파일로 다시 열린다.
+  static Future<void> closeAndReset() async {
+    await _database?.close();
+    _database = null;
+  }
+
   Future<Database> _initDB() async {
     final dbName = "${AppStyle.myLoggedInId ?? 'default'}_local.db";
     final path = join(await getDatabasesPath(), dbName);

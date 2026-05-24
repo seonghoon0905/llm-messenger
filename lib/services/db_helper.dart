@@ -268,10 +268,25 @@ class DBHelper {
     return await db.insert('messages', msg.toDbMap(roomId));
   }
 
+  /// timestamp + sender 조합이 이미 존재하면 삽입하지 않고 기존 id 반환.
+  /// 오프라인 동기화 시 WebSocket과의 중복 삽입 방지용.
+  Future<int> insertMessageIfAbsent(String roomId, Message msg) async {
+    final db = await database;
+    final ts = msg.timestamp.toIso8601String();
+    final existing = await db.query(
+      'messages',
+      where: 'roomId = ? AND timestamp = ? AND sender = ?',
+      whereArgs: [roomId, ts, msg.sender],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) return existing.first['id'] as int;
+    return await db.insert('messages', msg.toDbMap(roomId));
+  }
+
   Future<List<Message>> getMessages(String roomId) async {
     final db = await database;
     final maps = await db.query('messages',
-        where: 'roomId = ?', whereArgs: [roomId]);
+        where: 'roomId = ?', whereArgs: [roomId], orderBy: 'timestamp ASC');
     return maps.map(Message.fromMap).toList();
   }
 

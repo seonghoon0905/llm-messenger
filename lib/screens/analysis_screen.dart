@@ -713,7 +713,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
               width: 64,
               height: 64,
               fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => Container(
+              errorBuilder: (_, _, _) => Container(
                 width: 64,
                 height: 64,
                 decoration: BoxDecoration(

@@ -50,8 +50,11 @@ class ChatDialogs {
                           value: selected,
                           activeColor: AppStyle.primary,
                           onChanged: (v) => setDialogState(() {
-                            if (v == true) selectedIds.add(friend.userId);
-                            else selectedIds.remove(friend.userId);
+                            if (v == true) {
+                              selectedIds.add(friend.userId);
+                            } else {
+                              selectedIds.remove(friend.userId);
+                            }
                           }),
                           title: Text(friend.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
                           subtitle: Text('@${friend.userId}', style: const TextStyle(fontSize: 11)),

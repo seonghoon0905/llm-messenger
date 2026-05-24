@@ -1,64 +1,11 @@
 """GPT 프롬프트 빌드 + OpenAI 호출."""
 import json
 import urllib.request
-from typing import List
 
 from fastapi import HTTPException
 
 from config import SSL_CONTEXT, OPENAI_API_KEY, OPENAI_MODEL
-from models.schemas import AssistMessage, LlmAssistRequest, AutoReplyRequest
-
-
-# ── 말투 모드 ─────────────────────────────────────────────────────────────
-
-def normalize_register_mode(mode: str | None) -> str:
-    return "formal" if mode == "formal" else "casual"
-
-
-def infer_register_mode(recent: List[AssistMessage], partner_last: str) -> str:
-    """대화 맥락으로 말투 모드를 GPT 추론."""
-    if not OPENAI_API_KEY:
-        return "casual"
-
-    lines = []
-    for m in recent[-6:]:
-        speaker = "상대방" if m.role == "partner" else "나"
-        lines.append(f"[{speaker}] {m.text}")
-    if partner_last:
-        lines.append(f"[상대방] {partner_last}")
-    context = "\n".join(lines) or "(대화 내역 없음)"
-
-    system = """대화를 보고 사용자("나")가 상대방에게 어떤 말투를 써야 하는 관계인지 판단하세요.
-- "formal": 존댓말을 써야 하는 관계 (상사, 교수, 선배, 고객, 처음 보는 사람, 부모님 등)
-- "casual": 반말을 써도 되는 관계 (친구, 동생, 연인, 편한 동료 등)
-판단 기준:
-1. "나"의 발화 어미 최우선 (~요/~습니다 → formal, ~야/~어 → casual)
-2. 나의 발화가 없으면 상대방 호칭과 말투로 추론
-JSON만 반환: {"registerMode": "formal" | "casual"}"""
-
-    body = {
-        "model": OPENAI_MODEL,
-        "response_format": {"type": "json_object"},
-        "temperature": 0.1,
-        "max_tokens": 20,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": context},
-        ],
-    }
-    try:
-        req = urllib.request.Request(
-            "https://api.openai.com/v1/chat/completions",
-            data=json.dumps(body).encode(),
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=10, context=SSL_CONTEXT) as r:
-            content = json.loads(r.read())["choices"][0]["message"]["content"]
-            mode = json.loads(content).get("registerMode", "casual")
-            return mode if mode in ("formal", "casual") else "casual"
-    except Exception:
-        return "casual"
+from models.schemas import LlmAssistRequest, AutoReplyRequest
 
 
 # ── LLM Assist 프롬프트 ────────────────────────────────────────────────────
@@ -68,15 +15,12 @@ def build_llm_assist_system_prompt() -> str:
 당신은 한국어 메신저 답장 코치입니다.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【말투 규칙 — 2단계 기준】
-1단계(절대): [대화 모드]가 존댓말이면 전체 존댓말, 반말이면 전체 반말. 예외 없음.
-2단계(보정): [나의 말투 예시]로 어미·어휘 수준을 맞춤.
-  - 예시 어미가 "~어요/~할게요" 계열 → rewrite도 동일 어미 사용
-  - 예시 어미가 "~어/~할게" 계열 → rewrite도 동일 어미 사용
-  - 예시가 없으면 1단계(대화 모드)만 따른다.
-주의: 2단계는 1단계 범위 안에서만 적용한다.
-  존댓말 모드에서 예시 어미가 "~어요"라면, 더 격식 높은 "~겠습니다/~드리겠습니다/~예정입니다"로
-  올리지 않는다. 예시보다 격식이 높거나 낮아지지 않도록 수준을 맞춘다.
+【말투 매칭】
+- [최근 대화]와 [나의 말투 예시]를 보고 사용자가 자연스럽게 쓰는 어조·어미·격식 수준을
+  그대로 따라서 rewrite를 작성한다. 임의로 격상하거나 낮추지 말 것.
+- "~음/~함" 같은 특이 어미나 일관된 말버릇이 보이면 그 스타일을 유지한다.
+- 예시에 'ㅋㅋ'·이모티콘·짧은 추임새가 섞여 있어도 그 흔적을 rewrite 본문 앞뒤에 그대로 옮기지 말 것.
+  rewrite는 다듬어 보낼 진지한 답장이지 채팅 흔적의 복제가 아니다.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 [목표]
@@ -112,7 +56,7 @@ draft에 "됐어", "그냥 써라", "포기할게" 같은 포기 표현이 있�
 구분 기준: "지금 당장 멈추라는 요구인가" vs "이 패턴이 관계에 어떤 영향을 주는지에 대한 우려인가"
 
 [rewrite 작성 규칙]
-1. 말투는 [말투 규칙 2단계]에 따라 결정한다. 공문서·관료적 문체는 피한다.
+1. 말투는 [말투 매칭]에 따라 결정한다. 공문서·관료적 문체는 피한다.
 2. 사용자의 "핵심 결론·입장"은 절대 뒤집지 마세요. 톤·표현만 바꾸고 결론은 유지합니다.
 3. 단정적·통보형 톤은 제안형·문의형으로. 결론은 유지하되 표현만 부드럽게.
 4. rewrite 구성: 짧은 도입부 + 핵심 목적. 한두 문장으로 충분합니다.
@@ -131,7 +75,7 @@ draft에 "됐어", "그냥 써라", "포기할게" 같은 포기 표현이 있�
 3. 차분한 거절·자연스러운 단답·정상적 정보 전달은 그대로 (shouldFeedback=false).
 
 [판단 절차]
-1) [대화 모드] + [나의 말투 예시] 확인 → rewrite 어미·어휘 수준 결정.
+1) [최근 대화] + [나의 말투 예시]를 함께 보고 rewrite의 어미·격식 수준을 정한다.
 2) 상대 마지막 발화의 성격 파악.
 3) draft에서 사용자의 진짜 목적·결론을 파악. 포기 표현이 있으면 [충동적 포기 vs 실제 결론 판단] 기준 적용.
 4) 상대 행동 언급이 있으면 [상대방 행동 언급 기준]으로 ①/② 분류.
@@ -185,9 +129,6 @@ def build_llm_assist_user_prompt(payload: LlmAssistRequest) -> str:
         lines.append(f"[{speaker}] {m.get('text', '')}")
     context = "\n".join(lines) or "(대화 내역 없음)"
 
-    mode = normalize_register_mode(candidate.get("registerMode"))
-    mode_hint = "존댓말(격식체)" if mode == "formal" else "반말(캐주얼)"
-
     my_lines = [
         m.get("text", "") for m in recent
         if isinstance(m, dict) and m.get("role") == "me" and m.get("text", "").strip()
@@ -195,9 +136,6 @@ def build_llm_assist_user_prompt(payload: LlmAssistRequest) -> str:
     style_hint = " / ".join(my_lines[-3:]) if my_lines else "(없음)"
 
     return f"""
-[대화 모드]
-{mode_hint}
-
 [나의 말투 예시 — rewrite는 이 말투를 그대로 따를 것]
 {style_hint}
 
@@ -225,10 +163,8 @@ def build_auto_reply_system_prompt() -> str:
 사용자가 이전 대화에서 어떤 상황에 처해 있는지, 무엇이 필요한지를 파악해서 생성합니다.
 
 [원칙]
-1. 관계와 말투에 맞게 작성하세요.
-   - 친구·연인·편한 사이 → 자연스러운 반말
-   - 부모님·가족 → 가족체 (~해요/~할게요 수준)
-   - 교수님·상사·고객·격식 → 공손한 존댓말
+1. 대화 맥락에서 사용자가 자연스럽게 쓰는 말투(어조·어미·격식 수준)를 그대로 따라간다.
+   임의로 격상하거나 낮추지 말 것.
 2. 사용자가 처한 상황을 파악해서 그에 맞는 방향으로 생성합니다.
 3. 사용자가 말하지 않은 사과·약속·감사를 추가하지 마세요.
 4. 한두 문장으로 짧게 작성합니다.
@@ -246,16 +182,12 @@ def build_auto_reply_user_prompt(payload: AutoReplyRequest) -> str:
         lines.append(f"[{speaker}] {m.text}")
     context = "\n".join(lines) or "(대화 내역 없음)"
 
-    mode = normalize_register_mode(payload.registerMode) if payload.registerMode else \
-           infer_register_mode(payload.recentMessages, payload.partnerLastMessage)
-
-    tone = ("교수님·상사·고객 등 격식 관계입니다. 공손한 존댓말로 작성하세요."
-            if mode == "formal"
-            else "친구·연인·가족 등 편한 관계입니다. 자연스러운 반말 또는 가족체로 작성하세요.")
+    my_lines = [m.text for m in payload.recentMessages if m.role == "me" and m.text.strip()]
+    style_hint = " / ".join(my_lines[-3:]) if my_lines else "(없음)"
 
     return f"""
-[대화 모드]
-{tone}
+[나의 말투 예시 — 이 말투를 그대로 따를 것]
+{style_hint}
 
 [최근 대화 맥락]
 {context}

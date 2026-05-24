@@ -109,8 +109,6 @@ class AiLlmCandidatePayload {
 }
 
 class AiAnalyzeDraftResponse {
-  final String registerMode;
-  final double formalProb;
   final AiEmotionScores partnerEmotionScores;
   final AiEmotionScores myDraftEmotionScores;
   final AiEmotionShift emotionShift;
@@ -124,8 +122,6 @@ class AiAnalyzeDraftResponse {
   final String message;
 
   AiAnalyzeDraftResponse({
-    required this.registerMode,
-    required this.formalProb,
     required this.partnerEmotionScores,
     required this.myDraftEmotionScores,
     required this.emotionShift,
@@ -143,8 +139,6 @@ class AiAnalyzeDraftResponse {
     final rulesJson =
         (json['thinGateReasons'] as List<dynamic>? ?? json['rules'] as List<dynamic>? ?? const []);
     return AiAnalyzeDraftResponse(
-      registerMode: json['registerMode'] as String? ?? 'casual',
-      formalProb: (json['formalProb'] as num?)?.toDouble() ?? 0,
       partnerEmotionScores: AiEmotionScores.fromJson(
         json['partnerEmotionScores'] as Map<String, dynamic>?,
       ),

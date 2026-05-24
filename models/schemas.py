@@ -49,14 +49,12 @@ class LlmAssistRequest(BaseModel):
 class AutoReplyRequest(BaseModel):
     recentMessages: List[AssistMessage]
     partnerLastMessage: str
-    registerMode: Optional[str] = None
 
 
 class AnalyzeDraftRequest(BaseModel):
     recentMessages: List[AssistMessage]
     partnerLastMessage: str
     draft: str
-    registerMode: Optional[str] = None
 
 
 class LearyAnalysisRequest(BaseModel):

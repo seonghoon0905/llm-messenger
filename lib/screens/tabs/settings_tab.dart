@@ -5,6 +5,7 @@ import '../../services/api_service.dart';
 import '../../services/db_helper.dart';
 
 const _kAutoFeedbackPrefKey = 'autoFeedbackEnabled';
+const _kAutoFeedbackDelayPrefKey = 'autoFeedbackDelaySeconds';
 
 class SettingsTab extends StatefulWidget {
   final VoidCallback onLogout;
@@ -30,6 +31,8 @@ class _SettingsTabState extends State<SettingsTab> {
       setState(() {
         AppStyle.autoFeedbackEnabled =
             prefs.getBool(_kAutoFeedbackPrefKey) ?? true;
+        final saved = prefs.getInt(_kAutoFeedbackDelayPrefKey) ?? 2;
+        AppStyle.autoFeedbackDelaySeconds = saved.clamp(2, 5);
       });
     }
   }
@@ -38,6 +41,14 @@ class _SettingsTabState extends State<SettingsTab> {
     setState(() => AppStyle.autoFeedbackEnabled = value);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kAutoFeedbackPrefKey, value);
+  }
+
+  Future<void> _updateAutoFeedbackDelay(int seconds) async {
+    final clamped = seconds.clamp(2, 5);
+    if (clamped == AppStyle.autoFeedbackDelaySeconds) return;
+    setState(() => AppStyle.autoFeedbackDelaySeconds = clamped);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kAutoFeedbackDelayPrefKey, clamped);
   }
 
   void _showDeleteAccountDialog() {
@@ -108,7 +119,6 @@ class _SettingsTabState extends State<SettingsTab> {
     AppStyle.globalStream = null;
     AppStyle.myLoggedInId = null;
     AppStyle.myProfile = null;
-    AppStyle.roomRegisterModes.clear();
 
     if (mounted) {
       Navigator.pop(context); // close loading dialog
@@ -133,9 +143,20 @@ class _SettingsTabState extends State<SettingsTab> {
                     iconColor: AppStyle.primary,
                     iconBg: AppStyle.primaryLight,
                     label: 'AI 자동 피드백',
-                    description: '타이핑 중단 2초 후 자동으로 피드백을 분석합니다',
+                    description:
+                        '타이핑 중단 ${AppStyle.autoFeedbackDelaySeconds}초 후 자동으로 피드백을 분석합니다',
                     value: AppStyle.autoFeedbackEnabled,
                     onChanged: _toggleAutoFeedback,
+                  ),
+                  _buildSliderTile(
+                    icon: Icons.timer_outlined,
+                    iconColor: const Color(0xFF7C3AED),
+                    iconBg: const Color(0xFFF5F3FF),
+                    label: '피드백 지연 시간',
+                    description: '타이핑을 멈춘 뒤 분석까지 기다리는 시간',
+                    seconds: AppStyle.autoFeedbackDelaySeconds,
+                    enabled: AppStyle.autoFeedbackEnabled,
+                    onChanged: _updateAutoFeedbackDelay,
                   ),
                 ],
               ),
@@ -355,6 +376,137 @@ class _SettingsTabState extends State<SettingsTab> {
             onChanged: onChanged,
             activeThumbColor: Colors.white,
             activeTrackColor: AppStyle.primary,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSliderTile({
+    required IconData icon,
+    required Color iconColor,
+    required Color iconBg,
+    required String label,
+    required String description,
+    required int seconds,
+    required bool enabled,
+    required ValueChanged<int> onChanged,
+  }) {
+    final fadeColor = enabled ? null : AppStyle.textTertiary;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: enabled ? iconBg : AppStyle.surfaceVariant,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon,
+                    color: enabled ? iconColor : AppStyle.textTertiary,
+                    size: 19),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: fadeColor ?? AppStyle.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      description,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: fadeColor ?? AppStyle.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: enabled
+                      ? AppStyle.primaryLight
+                      : AppStyle.surfaceVariant,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$seconds초',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: enabled ? AppStyle.primary : AppStyle.textTertiary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape:
+                  const RoundSliderThumbShape(enabledThumbRadius: 8),
+              overlayShape:
+                  const RoundSliderOverlayShape(overlayRadius: 16),
+              activeTrackColor:
+                  enabled ? AppStyle.primary : AppStyle.textTertiary,
+              inactiveTrackColor: AppStyle.divider,
+              thumbColor:
+                  enabled ? AppStyle.primary : AppStyle.textTertiary,
+              overlayColor:
+                  (enabled ? AppStyle.primary : AppStyle.textTertiary)
+                      .withValues(alpha: 0.12),
+              tickMarkShape: const RoundSliderTickMarkShape(tickMarkRadius: 2),
+              activeTickMarkColor:
+                  enabled ? Colors.white : AppStyle.surface,
+              inactiveTickMarkColor: AppStyle.textTertiary.withValues(alpha: 0.4),
+            ),
+            child: Slider(
+              value: seconds.toDouble(),
+              min: 2,
+              max: 5,
+              divisions: 3,
+              label: '$seconds초',
+              onChanged: enabled
+                  ? (v) => onChanged(v.round())
+                  : null,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: const [
+                Text('2초',
+                    style: TextStyle(
+                        fontSize: 11, color: AppStyle.textTertiary)),
+                Text('3초',
+                    style: TextStyle(
+                        fontSize: 11, color: AppStyle.textTertiary)),
+                Text('4초',
+                    style: TextStyle(
+                        fontSize: 11, color: AppStyle.textTertiary)),
+                Text('5초',
+                    style: TextStyle(
+                        fontSize: 11, color: AppStyle.textTertiary)),
+              ],
+            ),
           ),
         ],
       ),

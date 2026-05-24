@@ -124,8 +124,8 @@ class AppStyle {
   static const String serverIp = "127.0.0.1";
   static const String wsUrl = "ws://$serverIp:8000/ws";
 
-  static final Map<String, String> roomRegisterModes = {};
   static bool autoFeedbackEnabled = true;
+  static int autoFeedbackDelaySeconds = 2; // 2..5
 
   static WebSocketChannel? channel;
   static Stream<dynamic>? globalStream;

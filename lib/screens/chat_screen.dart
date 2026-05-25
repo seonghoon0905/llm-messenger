@@ -594,8 +594,6 @@ class _ChatScreenState extends State<ChatScreen> {
     final nluSource = r.observedFeatures['nluSource'] ?? 'unavailable';
     return "debug: shouldInvokeLlm=${r.shouldInvokeLlm}, "
         "rules=${matchedRules.isEmpty ? 'none' : matchedRules}, "
-        "registerMode=${r.registerMode}, "
-        "formalProb=${r.formalProb.toStringAsFixed(2)}, "
         "partnerSpeechAct=${r.partnerSpeechAct}, "
         "mySpeechAct=${r.mySpeechAct}, "
         "nluSource=$nluSource, "
@@ -635,10 +633,8 @@ class _ChatScreenState extends State<ChatScreen> {
         recentMessages: recentMessages,
         partnerLastMessage: partnerLastMessage,
         draft: draft,
-        registerMode: AppStyle.roomRegisterModes[widget.chatRoom.id],
       );
       if (!mounted) return;
-      AppStyle.roomRegisterModes[widget.chatRoom.id] = analyzeResponse.registerMode;
       if (!analyzeResponse.shouldInvokeLlm) {
         setState(() {
           _shouldFeedback = false;
@@ -689,7 +685,6 @@ class _ChatScreenState extends State<ChatScreen> {
       final response = await _aiFeedbackService.generateAutoReply(
         recentMessages: recentMessages,
         partnerLastMessage: partnerLastMessage,
-        registerMode: AppStyle.roomRegisterModes[widget.chatRoom.id] ?? 'casual',
       );
       if (!mounted) return;
       _setDraftTextProgrammatically(response.reply);

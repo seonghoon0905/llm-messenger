@@ -167,31 +167,6 @@ def get_leary_speech_act(text: str) -> dict:
     return primary
 
 
-# ── 격식도 추정 ────────────────────────────────────────────────────────────
-
-def estimate_formal_prob(text: str) -> float:
-    s = text.strip()
-    if not s:
-        return 0.0
-    positive = {"습니다": 0.25, "입니다": 0.2, "해요": 0.15, "드려요": 0.2,
-                "주세요": 0.2, "드립니다": 0.25, "가능할까요": 0.25,
-                "괜찮으실까요": 0.25, "부탁드립니다": 0.3}
-    negative = {"해": 0.1, "야": 0.1, "ㅇㅇ": 0.25, "ㄱㄱ": 0.25,
-                "몰라": 0.2, "짜증나": 0.3, "싫어": 0.2, "귀찮": 0.25}
-    score = 0.5
-    for marker, w in positive.items():
-        if marker in s:
-            score += w
-    for marker, w in negative.items():
-        if marker in s:
-            score -= w
-    if s.endswith(("요", "니다", "까요")):
-        score += 0.1
-    if s.endswith(("야", "네", "ㅋ", "ㅎ")):
-        score -= 0.1
-    return max(0.0, min(1.0, score))
-
-
 def safe_score(value) -> float:
     try:
         return max(0.0, min(1.0, float(value)))

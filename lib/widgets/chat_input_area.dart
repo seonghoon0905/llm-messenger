@@ -7,6 +7,7 @@ import '../constants/app_style.dart';
 import '../models/message.dart';
 
 const _kAutoFeedbackPrefKey = 'autoFeedbackEnabled';
+const _kAutoFeedbackDelayPrefKey = 'autoFeedbackDelaySeconds';
 
 class ChatInputArea extends StatefulWidget {
   final TextEditingController controller;
@@ -88,6 +89,8 @@ class _ChatInputAreaState extends State<ChatInputArea> {
       setState(() {
         AppStyle.autoFeedbackEnabled =
             prefs.getBool(_kAutoFeedbackPrefKey) ?? true;
+        final saved = prefs.getInt(_kAutoFeedbackDelayPrefKey) ?? 2;
+        AppStyle.autoFeedbackDelaySeconds = saved.clamp(2, 5);
       });
     }
   }
@@ -101,9 +104,10 @@ class _ChatInputAreaState extends State<ChatInputArea> {
       _suppressNextFeedback = false;
       return;
     }
-    _feedbackTimer = Timer(const Duration(seconds: 2), () {
-      widget.onFeedbackPressed?.call();
-    });
+    _feedbackTimer = Timer(
+      Duration(seconds: AppStyle.autoFeedbackDelaySeconds),
+      () => widget.onFeedbackPressed?.call(),
+    );
   }
 
   Future<void> _toggleAutoFeedback(bool value) async {

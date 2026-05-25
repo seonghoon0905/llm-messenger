@@ -30,11 +30,14 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    if (AppStyle.myLoggedInId != null) {
-      AppStyle.connectSocket(AppStyle.myLoggedInId!);
-    }
-    _initGlobalSocket();
-    _syncInitialData();
+    // WebSocket은 동기화 완료 후 연결해야 중복 삽입 경쟁 없음
+    _syncInitialData().then((_) {
+      if (!mounted) return;
+      if (AppStyle.myLoggedInId != null) {
+        AppStyle.connectSocket(AppStyle.myLoggedInId!);
+      }
+      _initGlobalSocket();
+    });
   }
 
   Future<void> _syncInitialData() async {
@@ -108,7 +111,7 @@ class _MainScreenState extends State<MainScreen> {
                 DateTime.now(),
             isRead: false,
           );
-          await DBHelper().insertMessage(room.id, msg);
+          await DBHelper().insertMessageIfAbsent(room.id, msg);
           await DBHelper().upsertIncomingChatRoom(
             roomId: room.id,
             title: room.title,
@@ -154,7 +157,7 @@ class _MainScreenState extends State<MainScreen> {
             title: data['room_title'],
             relation: data['relation'] ?? "기타",
             lastMessageTime: DateTime.now(),
-            lastMessage: "${inviterId}님이 초대하셨습니다.",
+            lastMessage: "$inviterId님이 초대하셨습니다.",
             memberIds: [myId, if (inviterId.isNotEmpty) inviterId],
           );
           await DBHelper().insertChatRoomIfAbsent(newRoom);
@@ -323,7 +326,6 @@ class _MainScreenState extends State<MainScreen> {
     AppStyle.globalStream = null;
     AppStyle.myLoggedInId = null;
     AppStyle.myProfile = null;
-    AppStyle.roomRegisterModes.clear();
     await DBHelper.closeAndReset();
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(

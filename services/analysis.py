@@ -1,13 +1,11 @@
 """ThinGate 로직 + draft 분석 + Leary 분석."""
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from models.schemas import AnalyzeDraftRequest, AssistMessage
 from services.nlu import (
     get_emotion_scores, get_speech_act, get_leary_speech_act,
-    estimate_formal_prob, negative_emotion_sum, safe_score,
-    is_nlu_available,
+    negative_emotion_sum, safe_score,
 )
-from services.gpt import normalize_register_mode, infer_register_mode
 
 
 # ── 텍스트 패턴 판별 ──────────────────────────────────────────────────────
@@ -95,8 +93,6 @@ def _looks_like_answer(partner: str, draft: str) -> bool:
 def is_safe_to_skip(
     partner: str,
     draft: str,
-    register_mode: str,
-    formal_prob: float,
     partner_speech: dict,
     draft_emotion: dict,
     emotion_shift: dict,
@@ -123,7 +119,6 @@ def is_safe_to_skip(
     if _has_harsh_expression(s_draft): review.append("draft_harsh_expression")
     if _is_dismissive(s_draft):        review.append("draft_dismissive")
     if negative_emotion_sum(draft_emotion) >= 0.4: review.append("draft_high_negative_emotion")
-    if register_mode == "formal" and formal_prob < 0.5: review.append("formal_mismatch")
     if neg_streak.get("active"):       review.append("negative_emotion_streak_active")
     if emotion_shift.get("direction") == "worsened": review.append("emotion_shift_worsened")
 
@@ -138,8 +133,6 @@ def is_safe_to_skip(
 
 
 def build_thin_gate_reasons(
-    register_mode: str,
-    formal_prob: float,
     partner: str,
     draft: str,
     partner_speech: dict,
@@ -163,7 +156,6 @@ def build_thin_gate_reasons(
     d_neg          = negative_emotion_sum(draft_emotion)
 
     return [
-        {"id": "formal_mismatch",           "label": "격식체 대화에서 답장이 너무 캐주얼함",        "matched": register_mode == "formal" and formal_prob < 0.5,                                                    "severity": "medium"},
         {"id": "question_not_answered",      "label": "상대방 질문에 대한 답이 부족함",              "matched": is_q and (too_short or not has_answer),                                                             "severity": "high"},
         {"id": "request_not_addressed",      "label": "상대방 요청/부탁에 대한 반응이 부족함",       "matched": is_cmd and (too_short or my_act == "statement" and not has_answer),                                 "severity": "medium"},
         {"id": "harsh_expression",           "label": "답장에 차갑거나 강한 표현이 포함됨",          "matched": harsh or d_neg >= 0.6 or safe_score(draft_emotion.get("angerScore")) >= 0.4,                       "severity": "high"},
@@ -208,11 +200,6 @@ def analyze_draft(payload: AnalyzeDraftRequest) -> dict:
     draft   = payload.draft.strip()
     partner = payload.partnerLastMessage.strip()
 
-    mode = (normalize_register_mode(payload.registerMode)
-            if payload.registerMode
-            else infer_register_mode(payload.recentMessages, partner))
-
-    formal_prob    = estimate_formal_prob(draft)
     partner_speech = get_speech_act(partner)
     draft_speech   = get_speech_act(draft)
     partner_emo    = get_emotion_scores(partner)
@@ -230,7 +217,7 @@ def analyze_draft(payload: AnalyzeDraftRequest) -> dict:
         nlu_source = "unavailable"
 
     gate_reasons = build_thin_gate_reasons(
-        mode, formal_prob, partner, draft,
+        partner, draft,
         partner_speech, draft_speech,
         partner_emo, draft_emo, emo_shift, neg_streak,
     )
@@ -245,7 +232,7 @@ def analyze_draft(payload: AnalyzeDraftRequest) -> dict:
         )
     else:
         clearly_safe, safe_reasons, review_reasons = is_safe_to_skip(
-            partner, draft, mode, formal_prob,
+            partner, draft,
             partner_speech, draft_emo, emo_shift, neg_streak, nlu_source,
         )
         should     = not clearly_safe
@@ -256,8 +243,6 @@ def analyze_draft(payload: AnalyzeDraftRequest) -> dict:
         "recentMessages": [{"role": m.role, "text": m.text} for m in payload.recentMessages[-6:]],
         "partnerLastMessage": payload.partnerLastMessage,
         "draft": payload.draft,
-        "registerMode": mode,
-        "formalProb": formal_prob,
         "partnerSpeechAct": partner_speech.get("speechAct", "unknown"),
         "mySpeechAct": draft_speech.get("speechAct", "unknown"),
         "partnerEmotionScores": partner_emo,
@@ -270,8 +255,6 @@ def analyze_draft(payload: AnalyzeDraftRequest) -> dict:
     }
 
     return {
-        "registerMode": mode,
-        "formalProb": formal_prob,
         "partnerEmotionScores": partner_emo,
         "myDraftEmotionScores": draft_emo,
         "emotionShift": emo_shift,
@@ -291,8 +274,6 @@ def analyze_draft(payload: AnalyzeDraftRequest) -> dict:
             "draftLooksLikeAnswer": _looks_like_answer(partner, draft),
             "containsHarshExpression": _has_harsh_expression(draft),
             "draftLooksDismissive": _is_dismissive(draft),
-            "registerMode": mode,
-            "formalProb": formal_prob,
             "partnerSpeechAct": partner_speech.get("speechAct", "unknown"),
             "mySpeechAct": draft_speech.get("speechAct", "unknown"),
             "partnerEmotionScores": partner_emo,

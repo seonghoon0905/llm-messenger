@@ -30,7 +30,7 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-/build/
+**/build/
 /coverage/
 
 # Symbolication related
@@ -53,3 +53,7 @@ app.*.map.json
 __pycache__/
 *.py[cod]
 auth_server.db
+
+# 작업과 무관한 로컬 파일·별개 프로젝트
+intercom.md
+실습_Test/

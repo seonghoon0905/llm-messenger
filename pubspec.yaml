@@ -1,5 +1,5 @@
 name: llm_messenger
-description: "A new Flutter project."
+description: "DADUEM - AI 답장 코칭 메신저"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -54,6 +54,26 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "icon/DADUEM.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+  web:
+    generate: true
+    image_path: "icon/DADUEM.png"
+    background_color: "#000000"
+    theme_color: "#2563EB"
+  macos:
+    generate: true
+    image_path: "icon/DADUEM.png"
+  windows:
+    generate: true
+    image_path: "icon/DADUEM.png"
+    icon_size: 48
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -93,6 +113,7 @@ flutter:
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
   assets:
+    - icon/DADUEM.png
     - icon/책임적.png
     - icon/지배적.png
     - icon/독재적.png

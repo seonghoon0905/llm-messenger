@@ -154,19 +154,15 @@ class ApiService {
   Future<Map<String, dynamic>> analyzeLeary({
     required List<Map<String, String>> messages,
   }) async {
-    try {
-      final response = await http.post(
-        Uri.parse("${AppStyle.baseUrl}/analyze-leary"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"messages": messages}),
-      );
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
-      }
-      return {"dominance": 50.0, "affiliation": 50.0};
-    } catch (e) {
-      return {"dominance": 50.0, "affiliation": 50.0};
+    final response = await http.post(
+      Uri.parse("${AppStyle.baseUrl}/analyze-leary"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"messages": messages}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception("analyze-leary 실패: HTTP ${response.statusCode}");
     }
+    return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> deleteAccount(String userId) async {

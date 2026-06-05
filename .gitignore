@@ -18,10 +18,11 @@ migrate_working_dir/
 *.iws
 .idea/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# VSCode 개인 설정 (절대경로 포함되어 공유 부적절)
+.vscode/
+
+# Claude Code 로컬 권한 설정
+.claude/
 
 # Flutter/Dart/Pub related
 **/doc/api/
@@ -46,14 +47,31 @@ app.*.map.json
 
 # 환경변수 (API 키 등 민감 정보)
 .env
+.env.*
 .env.local
 .env.*.local
+!.env.example
 
 # Python 백엔드
 __pycache__/
 *.py[cod]
 auth_server.db
+*.db
+*.sqlite
+*.sqlite3
+
+# 배포 서명·외부 서비스 비밀 파일
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+google-services.json
+GoogleService-Info.plist
 
 # 작업과 무관한 로컬 파일·별개 프로젝트
 intercom.md
 실습_Test/
+
+# 평가 산출물 (보고서 작성용 — 깃 추적 안 함)
+/eval/

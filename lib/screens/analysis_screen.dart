@@ -139,6 +139,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
           'analyzed_count':   (result['analyzed_count']    as num? ?? myCount).toDouble(),
           'my_message_count': (result['my_message_count']  as num? ?? myCount).toDouble(),
           'quadrant':         result['quadrant'] as String? ?? _defaultQuadrant,
+          'reliability':      result['reliability'] as String? ?? 'low',
         };
         _isAnalyzing = false;
       });
@@ -162,6 +163,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
 
   String get _currentQuadrant =>
       _scores?['quadrant'] as String? ?? _defaultQuadrant;
+
+  String get _reliability =>
+      _scores?['reliability'] as String? ?? 'low';
 
   /// [주도, 우호, 순응, 적대]
   List<double> get _learyValues {
@@ -606,7 +610,68 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         const SizedBox(height: 20),
         // 포지션 요약 배지
         _buildPositionSummary(dominance, affiliation),
+        const SizedBox(height: 10),
+        _buildReliabilityBadge(),
       ],
+    );
+  }
+
+  // 분석 신뢰도 배지 (NLU 모델 기반 vs 키워드 기반)
+  Widget _buildReliabilityBadge() {
+    final (label, desc, color, icon) = switch (_reliability) {
+      'high' => (
+        '신뢰도 높음',
+        'NLU 모델(감정·화행) 기반 분석',
+        const Color(0xFF10B981),
+        Icons.verified_rounded,
+      ),
+      'medium' => (
+        '신뢰도 보통',
+        'NLU 모델과 키워드 분석 혼합',
+        const Color(0xFFF59E0B),
+        Icons.shield_outlined,
+      ),
+      _ => (
+        '신뢰도 낮음',
+        'NLU 서버 미연결 · 키워드 기반 추정',
+        const Color(0xFF6B7280),
+        Icons.help_outline_rounded,
+      ),
+    };
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              desc,
+              style: TextStyle(
+                fontSize: 11,
+                color: color.withValues(alpha: 0.8),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

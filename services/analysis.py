@@ -345,7 +345,6 @@ def _leary_reliability(emo_sources: List[str], act_sources: List[str]) -> dict:
     e_ok = e_agg in ("model", "model-assisted", "mixed")
     a_ok = a_agg in ("model", "model-assisted", "mixed")
     if e_agg == "model" and a_agg == "model":   reliability = "high"
-    elif e_ok and a_ok:                          reliability = "medium"
     elif e_ok or a_ok:                           reliability = "medium"
     else:                                        reliability = "low"
 
@@ -410,8 +409,10 @@ def analyze_leary(messages: List[AssistMessage]) -> dict:
                   if partner_msgs else avg_my_len)
     total_len  = avg_my_len + avg_pt_len
     length_ratio = avg_my_len / total_len if total_len > 0 else 0.5
+    # 상대 메시지가 없으면 비교 기준이 없으므로 중립(0.5)으로 둔다.
     total_count  = len(my_msgs) + len(partner_msgs)
-    count_ratio  = len(my_msgs) / total_count if total_count > 0 else 0.5
+    count_ratio  = (len(my_msgs) / total_count
+                    if partner_msgs and total_count > 0 else 0.5)
 
     dominance = max(5.0, min(95.0,
         50.0 + speech_dom * 30 + (length_ratio - 0.5) * 30 + (count_ratio - 0.5) * 20

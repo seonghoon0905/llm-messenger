@@ -8,8 +8,7 @@
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Python_3.13-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4.1-412991?logo=openai&logoColor=white)](https://openai.com)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](#라이선스)
+[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o--mini-412991?logo=openai&logoColor=white)](https://openai.com)
 [![Korean NLU](https://img.shields.io/badge/Korean_NLU-KOTE_%2B_3i4K-FF6F00)](#한국어-nlu)
 
 [주요 기능](#주요-기능) ·
@@ -42,10 +41,10 @@ LLM Messenger는 **Flutter + FastAPI 기반의 실시간 한국어 채팅 애플
 | **AI 답장 코칭** | 타이핑 2초 정지 시 자동 분석, 톤·감정 피드백 + rewrite 제안 |
 | **자동 응답 생성** | 상대 메시지 맥락 분석해 답장 초안 자동 생성 |
 | **한국어 NLU** | KOTE 감정 분류 (5개 군) + 3i4K 화행 분류 |
-| **ThinGate 알고리즘** | 7가지 규칙 기반 사전 분석으로 불필요한 LLM 호출 최소화 |
+| **ThinGate 알고리즘** | 규칙 기반 사전 분석으로 불필요한 LLM 호출 최소화 |
 | **성격 분석 리포트** | Leary 대인관계 모델 기반 (주도–순응 / 우호–적대 2축) |
 | **친구 관리** | 친구 추가·삭제, 1:1 채팅방 생성 |
-| **오프라인 동기화** | 재접속 시 누락 메시지 자동 동기화 (중복 방지) |
+| **오프라인 동기화** | 재접속 시 누락된 일반 메시지 자동 동기화 (중복 방지) |
 
 ---
 
@@ -69,7 +68,7 @@ LLM Messenger는 **Flutter + FastAPI 기반의 실시간 한국어 채팅 애플
 │  │  auth.py │  │friends.py│  │ rooms.py │  │   ws.py         │ │
 │  └──────────┘  └──────────┘  └──────────┘  └────────────────┘ │
 │  ┌────────────────────────────────────────────────────────────┐ │
-│  │  analysis.py — ThinGate + draft 분석 + Leary 분석          │ │
+│  │  analysis.py - ThinGate + draft 분석 + Leary 분석           │ │
 │  └────────────────┬──────────────────────────┬────────────────┘ │
 │         ┌─────────┘                          └─────────┐        │
 │         ▼                                              ▼        │
@@ -81,10 +80,10 @@ LLM Messenger는 **Flutter + FastAPI 기반의 실시간 한국어 채팅 애플
           │                                           │
           ▼                                           ▼
 ┌──────────────────────┐                ┌──────────────────────┐
-│ Korean NLU Server    │                │   OpenAI GPT-4.1     │
-│ (port 8001)          │                │   /llm-assist        │
-│  • KOTE  감정 분류    │                │   /auto-reply        │
-│  • 3i4K  화행 분류    │                │                      │
+│ Korean NLU Server    │                │     OpenAI API       │
+│ (port 8001)          │                │  configured model    │
+│  - KOTE  감정 분류    │                │  feedback / rewrite  │
+│  - 3i4K  화행 분류    │                │  auto reply          │
 └──────────────────────┘                └──────────────────────┘
 ```
 
@@ -97,7 +96,7 @@ LLM Messenger는 **Flutter + FastAPI 기반의 실시간 한국어 채팅 애플
 | **클라이언트** | Flutter (Dart) · sqflite · SharedPreferences |
 | **메인 백엔드** | FastAPI · WebSocket · SQLite |
 | **NLU 서버** | FastAPI · HuggingFace Transformers · PyTorch |
-| **AI 모델** | OpenAI GPT-4.1 (피드백·rewrite·자동응답) |
+| **AI 모델** | OpenAI Chat Completions API (기본값 `gpt-4o-mini`, 환경변수로 변경 가능) |
 | **한국어 모델** | `tobykim/koelectra-44emotions` (KOTE) · `bespin-global/klue-roberta-small-3i4k-intent-classification` (3i4K) |
 | **개발 환경** | Python 3.13 · Dart SDK 3.x |
 
@@ -117,7 +116,7 @@ LLM Messenger는 **Flutter + FastAPI 기반의 실시간 한국어 채팅 애플
 
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_MODEL=gpt-4.1
+OPENAI_MODEL=gpt-4o-mini
 KOREAN_NLU_BASE_URL=http://localhost:8001
 ```
 
@@ -125,7 +124,7 @@ KOREAN_NLU_BASE_URL=http://localhost:8001
 
 ```bash
 # Python 백엔드
-pip install fastapi uvicorn websockets pydantic certifi
+pip install fastapi "uvicorn[standard]" pydantic certifi
 
 # 한국어 NLU 서버
 pip install -r korean_nlu/requirements.txt
@@ -152,12 +151,12 @@ cd korean_nlu && python3 -m uvicorn main:app --host 0.0.0.0 --port 8001
 flutter run
 ```
 
-> `lib/constants/app_style.dart`의 `baseUrl`은 기본값이 `http://127.0.0.1:8000`이므로, 앱과 서버는 같은 기기에서 실행하는 것을 권장합니다.
+> `lib/constants/app_style.dart`의 `baseUrl`은 기본값이 `http://127.0.0.1:8000`입니다. 데스크톱 앱은 같은 컴퓨터에서 서버를 실행하면 연결할 수 있지만, Android 에뮬레이터나 실제 모바일 기기에서는 호스트 컴퓨터의 IP 주소로 변경해야 합니다.
 
 ### 5. 서버 상태 확인
 
 ```bash
-curl http://127.0.0.1:8000/        # 메인 서버
+curl http://127.0.0.1:8000/openapi.json  # 메인 서버
 curl http://127.0.0.1:8001/health  # NLU 서버
 ```
 
@@ -230,6 +229,7 @@ llm-messenger/
 | `DELETE` | `/friends/remove` | 친구 삭제 |
 | `GET` | `/users/{id}/rooms` | 채팅방 목록 조회 |
 | `POST` | `/rooms/direct` | 1:1 채팅방 생성 |
+| `GET` | `/rooms/{room_id}/messages` | 전체 또는 `since` 이후 누락 메시지 조회 |
 
 ### AI 분석
 
@@ -265,7 +265,7 @@ llm-messenger/
   │         └────────┬────────┘            │
   │                  ▼                     │
   │         ┌─────────────────┐            │
-  │         │ ThinGate 7규칙  │            │
+  │         │ ThinGate 사전검토│            │
   │         │   판단 로직     │            │
   │         └────────┬────────┘            │
   └──────────────────┼─────────────────────┘
@@ -285,15 +285,22 @@ llm-messenger/
                   └────────────────────────┘
 ```
 
-### ThinGate 7가지 규칙
+### ThinGate 사전 검토 조건
 
-1. `partner_question` — 상대방의 질문 (응답 의무)
-2. `partner_request_or_command` — 상대방의 요청/명령
-3. `partner_distress` — 상대방의 힘듦 표현
-4. `partner_conflict_or_complaint` — 상대방의 불만/갈등
-5. `draft_harsh_expression` — 답장에 거친 표현
-6. `draft_dismissive` — 답장이 무심한 톤
-7. `draft_high_negative_emotion` — 답장의 부정 감정 점수 임계 초과
+다음 신호 중 하나라도 감지되면 LLM 검토 대상으로 분류합니다.
+
+1. `partner_question` - 상대방의 질문
+2. `partner_request_or_command` - 상대방의 요청 또는 명령
+3. `partner_invitation_or_proposal` - 상대방의 초대 또는 제안
+4. `partner_distress` - 상대방의 힘듦 표현
+5. `partner_conflict_or_complaint` - 상대방의 불만 또는 갈등
+6. `draft_harsh_expression` - 답장의 거친 표현
+7. `draft_dismissive` - 무심하게 들릴 수 있는 답장
+8. `draft_high_negative_emotion` - 답장의 높은 부정 감정 점수
+9. `negative_emotion_streak_active` - 최근 상대방의 부정 감정이 연속됨
+10. `emotion_shift_worsened` - 답장으로 감정 톤이 악화될 가능성
+
+NLU 서버를 사용할 수 없고 단순한 일상 대화라고 확실히 판단할 수 없는 경우에도 안전을 위해 LLM 검토 대상으로 분류합니다. 이후 상세 분석에서는 질문 미응답, 요청 미반영, 거친 표현, 감정 악화, 힘든 상황에 대한 무심한 답장, 부정 감정 연속 상황의 차가운 답장을 별도 사유로 제공합니다.
 
 자세한 알고리즘 설명은 [보고서_답장코칭알고리즘.md](./보고서_답장코칭알고리즘.md)를 참고하세요.
 
@@ -306,7 +313,7 @@ llm-messenger/
 | 기능 | 모델 | 출력 |
 |---|---|---|
 | **감정 분류** | `tobykim/koelectra-44emotions` (KOTE 기반) | `distressScore`, `angerScore`, `burdenScore`, `warmthScore`, `neutralScore` (각 0.0~1.0) |
-| **화행 분류** | `bespin-global/klue-roberta-small-3i4k-intent-classification` | `statement`, `question`, `request`, `command`, `rhetorical_*`, `fragment`, `intonation_dependent` |
+| **화행 분류** | `bespin-global/klue-roberta-small-3i4k-intent-classification` | 모델: `statement`, `question`, `command`, `rhetorical_*`, `fragment`, `intonation_dependent` / fallback: `request` 포함 |
 
 NLU 서버가 비활성 상태일 때는 메인 백엔드가 자동으로 키워드 기반 fallback 규칙으로 전환됩니다 (`services/nlu.py`).
 
@@ -316,10 +323,10 @@ NLU 서버가 비활성 상태일 때는 메인 백엔드가 자동으로 키워
 
 채팅 누적 메시지를 기반으로 [Leary 대인관계 모델](https://en.wikipedia.org/wiki/Interpersonal_circle)의 2축으로 사용자를 평가합니다.
 
-- **주도성 (Dominance)**: 0~100 — 화행 분포 + 메시지 길이/수 비율 기반
-- **우호성 (Affiliation)**: 0~100 — KOTE 감정 점수 기반
+- **주도성 (Dominance)**: 5~95 - 화행 분포 + 메시지 길이/수 비율 기반
+- **우호성 (Affiliation)**: 5~95 - KOTE 감정 점수 기반
 
-결과는 4분면 quadrant (`leading-friendly`, `leading-hostile`, `following-friendly`, `following-hostile`)로 분류됩니다.
+결과는 주도성 3단계(`leading`, `balanced`, `following`)와 우호성 3단계(`friendly`, `neutral`, `hostile`)를 조합한 9개 유형으로 분류됩니다.
 
 자세한 알고리즘은 [보고서_성격분석리포트.md](./보고서_성격분석리포트.md)를 참고하세요.
 
@@ -327,4 +334,4 @@ NLU 서버가 비활성 상태일 때는 메인 백엔드가 자동으로 키워
 
 ## 라이선스
 
-MIT
+현재 저장소에는 별도 라이선스 파일이 포함되어 있지 않습니다.

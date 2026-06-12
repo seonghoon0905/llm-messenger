@@ -41,7 +41,7 @@ LLM Messenger는 **Flutter + FastAPI 기반의 실시간 한국어 채팅 애플
 | **AI 답장 코칭** | 타이핑 2초 정지 시 자동 분석, 톤·감정 피드백 + rewrite 제안 |
 | **자동 응답 생성** | 상대 메시지 맥락 분석해 답장 초안 자동 생성 |
 | **한국어 NLU** | KOTE 감정 분류 (5개 군) + 3i4K 화행 분류 |
-| **ThinGate 알고리즘** | 규칙 기반 사전 분석으로 불필요한 LLM 호출 최소화 |
+| **ThinGate 알고리즘** | 6개 규칙 기반 분석으로 불필요한 LLM 호출 최소화 |
 | **성격 분석 리포트** | Leary 대인관계 모델 기반 (주도–순응 / 우호–적대 2축) |
 | **친구 관리** | 친구 추가·삭제, 1:1 채팅방 생성 |
 | **오프라인 동기화** | 재접속 시 누락된 일반 메시지 자동 동기화 (중복 방지) |
@@ -265,7 +265,7 @@ llm-messenger/
   │         └────────┬────────┘            │
   │                  ▼                     │
   │         ┌─────────────────┐            │
-  │         │ ThinGate 사전검토│            │
+  │         │ ThinGate 6규칙  │            │
   │         │   판단 로직     │            │
   │         └────────┬────────┘            │
   └──────────────────┼─────────────────────┘
@@ -285,22 +285,16 @@ llm-messenger/
                   └────────────────────────┘
 ```
 
-### ThinGate 사전 검토 조건
+### ThinGate 6가지 규칙
 
-다음 신호 중 하나라도 감지되면 LLM 검토 대상으로 분류합니다.
+초안과 대화 맥락을 다음 6개 규칙으로 분석합니다.
 
-1. `partner_question` - 상대방의 질문
-2. `partner_request_or_command` - 상대방의 요청 또는 명령
-3. `partner_invitation_or_proposal` - 상대방의 초대 또는 제안
-4. `partner_distress` - 상대방의 힘듦 표현
-5. `partner_conflict_or_complaint` - 상대방의 불만 또는 갈등
-6. `draft_harsh_expression` - 답장의 거친 표현
-7. `draft_dismissive` - 무심하게 들릴 수 있는 답장
-8. `draft_high_negative_emotion` - 답장의 높은 부정 감정 점수
-9. `negative_emotion_streak_active` - 최근 상대방의 부정 감정이 연속됨
-10. `emotion_shift_worsened` - 답장으로 감정 톤이 악화될 가능성
-
-NLU 서버를 사용할 수 없고 단순한 일상 대화라고 확실히 판단할 수 없는 경우에도 안전을 위해 LLM 검토 대상으로 분류합니다. 이후 상세 분석에서는 질문 미응답, 요청 미반영, 거친 표현, 감정 악화, 힘든 상황에 대한 무심한 답장, 부정 감정 연속 상황의 차가운 답장을 별도 사유로 제공합니다.
+1. `question_not_answered` - 상대방 질문에 대한 답이 부족함
+2. `request_not_addressed` - 상대방 요청 또는 부탁에 대한 반응이 부족함
+3. `harsh_expression` - 답장에 차갑거나 강한 표현이 포함됨
+4. `emotion_shift_worsened` - 답장으로 감정 톤이 악화될 가능성
+5. `distress_dismissive` - 상대가 힘든 상황인데 답장이 무심하게 들릴 수 있음
+6. `negative_streak_cold_reply` - 상대방의 부정 감정이 이어지는 상황에서 답장이 짧거나 차가움
 
 자세한 알고리즘 설명은 [보고서_답장코칭알고리즘.md](./보고서_답장코칭알고리즘.md)를 참고하세요.
 
